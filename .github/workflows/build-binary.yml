@@ -1,0 +1,117 @@
+name: Build Binary
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select newest preinstalled Xcode
+        run: |
+          XCODE_APP=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
+          echo "Using $XCODE_APP"
+          sudo xcode-select -s "$XCODE_APP/Contents/Developer"
+          sudo xcodebuild -runFirstLaunch || true
+
+      - name: Cache SPM checkouts
+        uses: actions/cache@v4
+        with:
+          path: |
+            .build/DerivedData/SourcePackages
+            ~/Library/Caches/org.swift.swiftpm
+          key: hex-spm-${{ runner.os }}-${{ hashFiles('HexCore/Package.resolved') }}
+          restore-keys: |
+            hex-spm-${{ runner.os }}-
+          save-always: true
+
+      - name: Diagnose coverage settings
+        run: |
+          xcodebuild -scheme Hex -configuration Release -showBuildSettings 2>/dev/null | grep -iE "COVERAGE|PROFILE|OTHER_SWIFT_FLAGS" || echo "no coverage-related settings resolve"
+          echo "---"
+          xcodebuild -scheme Hex -configuration Release -showBuildSettings 2>/dev/null | grep -iE "^ *CLANG_ENABLE_CODE_COVERAGE|CLANG_COVERAGE_MAPPING"
+
+      - name: Kill orphan ibtoold processes
+        run: |
+          killall ibtoold 2>/dev/null || true
+          killall AssetCatalogSimulatorAgent 2>/dev/null || true
+
+      - name: Build (Release)
+        run: |
+          for attempt in 1 2 3; do
+            xcodebuild \
+              -scheme Hex \
+              -configuration Release \
+              -destination 'platform=macOS,arch=arm64' \
+              -derivedDataPath .build/DerivedData \
+              -skipMacroValidation \
+              CLANG_ENABLE_CODE_COVERAGE=NO \
+              ENABLE_CODE_COVERAGE=NO \
+              CODE_SIGN_IDENTITY=- \
+              CODE_SIGN_STYLE=Manual \
+              CODE_SIGNING_REQUIRED=YES \
+              build 2>&1 | tee /tmp/build.log
+            rc=${PIPESTATUS[0]}
+            if [ "$rc" -eq 0 ]; then
+              APP_SWIFTC=$(grep -m1 "module-name Hex " /tmp/build.log | grep -vE "36;1m|echo")
+              if echo "$APP_SWIFTC" | grep -q -- "-profile-generate"; then
+                echo "::warning::app still compiled with profile-generate instrumentation"
+              else
+                echo "app compiled WITHOUT coverage instrumentation - clean"
+              fi
+              exit 0
+            fi
+            tail -120 /tmp/build.log
+            if ! grep -q "CompileAssetCatalogVariant failed\|IBPlatformToolFailureException\|The tool closed the connection" /tmp/build.log; then
+              echo "::error::xcodebuild failed (exit $rc) - not an ibtoold crash"
+              exit "$rc"
+            fi
+            echo "::warning::Attempt $attempt hit the known Xcode 26 ibtoold/asset-catalog crash; retrying"
+            killall ibtoold 2>/dev/null || true
+            killall AssetCatalogSimulatorAgent 2>/dev/null || true
+            rm -rf .build/DerivedData/Build/Intermediates.noindex/Hex.build/Release/Hex.build/assetcatalog* \
+                   .build/DerivedData/Build/Products/Release/Hex.app/Contents/Resources/Assets.car \
+                   .build/DerivedData/Build/Products/Release/Hex.app/Contents/Resources/AppIcon.car
+            sleep 5
+          done
+          echo "::error::All 3 attempts failed due to ibtoold crashes"
+          exit 1
+
+      - name: Package DMG
+        run: |
+          APP=".build/DerivedData/Build/Products/Release/Hex.app"
+          VERSION=$(defaults read "$(pwd)/$APP/Contents/Info.plist" CFBundleShortVersionString)
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          mkdir -p dmg-root
+          cp -R "$APP" dmg-root/
+          ln -s /Applications dmg-root/Applications
+          hdiutil create -volname Hex -srcfolder dmg-root -ov -format UDZO "Hex-$VERSION.dmg"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: hex-${{ env.VERSION }}
+          path: Hex-*.dmg
+          if-no-files-found: error
+
+      - name: Create GitHub release (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            Hex-*.dmg \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Hex $GITHUB_REF_NAME" \
+            --notes "Automated build from $GITHUB_SHA"
