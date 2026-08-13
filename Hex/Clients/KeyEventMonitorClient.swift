@@ -10,6 +10,7 @@ import HexCore
 import IOKit
 import IOKit.hidsystem
 import Sauce
+import os
 
 private let logger = HexLog.keyEvent
 
@@ -92,6 +93,23 @@ extension DependencyValues {
 }
 
 class KeyEventMonitorClientLive {
+  private typealias KeyEventHandler = @Sendable (KeyEvent) -> Bool
+  private typealias InputEventHandler = @Sendable (InputEvent) -> Bool
+
+  /// Lock-protected mirror of the state the tap callback reads on every system input event
+  /// (handler lists, delivery proof, watchdog burst deadline). Kept out of `queue` so the
+  /// per-event path never pays a queue hop or an allocation.
+  private struct EventTapSnapshot {
+    var keyHandlers: [KeyEventHandler] = []
+    var inputHandlers: [InputEventHandler] = []
+    var inputMonitoringProof = false
+    var watchdogBurstDeadline = Date.distantPast
+  }
+
+  private let eventTapState = OSAllocatedUnfairLock<EventTapSnapshot>(
+    initialState: EventTapSnapshot()
+  )
+
   private var eventTapPort: CFMachPort?
   private var runLoopSource: CFRunLoopSource?
   private var continuations: [UUID: @Sendable (KeyEvent) -> Bool] = [:]
@@ -114,7 +132,11 @@ class KeyEventMonitorClientLive {
   private let inputMonitoringTrustProvider: @Sendable () -> Bool
   @Shared(.hotkeyPermissionState) private var hotkeyPermissionState: HotkeyPermissionState
 
-  private let trustCheckIntervalNanoseconds: UInt64 = 100_000_000 // 100ms
+  /// Watchdog cadence: 1s steady state, bursting at 100ms for `watchdogBurstDuration`
+  /// after system transitions so taps that macOS silently disables recover quickly (#250).
+  private static let watchdogSteadyStateIntervalNanoseconds: UInt64 = 1_000_000_000
+  private static let watchdogBurstIntervalNanoseconds: UInt64 = 100_000_000
+  private static let watchdogBurstDuration: TimeInterval = 3
 
   init(
     accessibilityTrustProvider: @escaping @Sendable () -> Bool = {
@@ -187,6 +209,7 @@ class KeyEventMonitorClientLive {
           continuation.yield(event)
           return false
         }
+        self.refreshEventTapSnapshot()
         let shouldStart = self.continuations.count == 1 && self.inputContinuations.isEmpty
 
         // Start monitoring if this is the first subscription
@@ -206,6 +229,7 @@ class KeyEventMonitorClientLive {
     queue.async(flags: .barrier) { [weak self] in
       guard let self = self else { return }
       self.continuations[uuid] = nil
+      self.refreshEventTapSnapshot()
       if self.continuations.isEmpty && self.inputContinuations.isEmpty {
         self.stopMonitoring()
       }
@@ -216,6 +240,7 @@ class KeyEventMonitorClientLive {
     queue.async(flags: .barrier) { [weak self] in
       guard let self = self else { return }
       self.inputContinuations[uuid] = nil
+      self.refreshEventTapSnapshot()
       if self.continuations.isEmpty && self.inputContinuations.isEmpty {
         self.stopMonitoring()
       }
@@ -237,6 +262,7 @@ class KeyEventMonitorClientLive {
     queue.async(flags: .barrier) { [weak self] in
       guard let self = self else { return }
       self.continuations[uuid] = handler
+      self.refreshEventTapSnapshot()
       let shouldStart = self.continuations.count == 1 && self.inputContinuations.isEmpty
 
       if shouldStart {
@@ -255,6 +281,7 @@ class KeyEventMonitorClientLive {
     queue.async(flags: .barrier) { [weak self] in
       guard let self = self else { return }
       self.inputContinuations[uuid] = handler
+      self.refreshEventTapSnapshot()
       let shouldStart = self.inputContinuations.count == 1 && self.continuations.isEmpty
 
       if shouldStart {
@@ -297,6 +324,7 @@ class KeyEventMonitorClientLive {
   // no separate helper; handled inline above
 
   private func watchPermissions() async {
+    requestWatchdogBurst()
     var last = (
       accessibility: currentAccessibilityTrust(),
       input: currentInputMonitoringTrust()
@@ -304,7 +332,10 @@ class KeyEventMonitorClientLive {
     await handlePermissionChange(accessibility: last.accessibility, input: last.input, reason: "initial")
 
     while !Task.isCancelled {
-      try? await Task.sleep(nanoseconds: trustCheckIntervalNanoseconds)
+      let isBurst = eventTapState.withLock { $0.watchdogBurstDeadline > Date() }
+      let burstInterval = Self.watchdogBurstIntervalNanoseconds
+      let steadyInterval = Self.watchdogSteadyStateIntervalNanoseconds
+      try? await Task.sleep(nanoseconds: isBurst ? burstInterval : steadyInterval)
       let current = (
         accessibility: currentAccessibilityTrust(),
         input: currentInputMonitoringTrust()
@@ -320,6 +351,9 @@ class KeyEventMonitorClientLive {
           reason = "revoked"
         } else {
           reason = "updated"
+        }
+        if combinedAfter && !combinedBefore {
+          requestWatchdogBurst()
         }
         await handlePermissionChange(accessibility: current.accessibility, input: current.input, reason: reason)
         last = current
@@ -394,6 +428,7 @@ class KeyEventMonitorClientLive {
       // macOS disabled without sending a tapDisabled event (observed after sleep, #250).
       if let eventTapPort, !CGEvent.tapIsEnabled(tap: eventTapPort) {
         CGEvent.tapEnable(tap: eventTapPort, enable: true)
+        requestWatchdogBurst()
         logger.notice("Re-enabled event tap that was silently disabled (reason: \(reason)).")
       }
       return
@@ -497,13 +532,32 @@ class KeyEventMonitorClientLive {
 
   private func clearInputMonitoringProof() {
     queue.async(flags: .barrier) { [weak self] in
-      self?.inputMonitoringProvenByEvents = false
+      guard let self = self else { return }
+      self.inputMonitoringProvenByEvents = false
+      self.eventTapState.withLock { $0.inputMonitoringProof = false }
+    }
+  }
+
+  private func refreshEventTapSnapshot() {
+    eventTapState.withLock { state in
+      state.keyHandlers = Array(continuations.values)
+      state.inputHandlers = Array(inputContinuations.values)
+    }
+  }
+
+  private func requestWatchdogBurst() {
+    eventTapState.withLock { state in
+      let deadline = Date().addingTimeInterval(Self.watchdogBurstDuration)
+      if deadline > state.watchdogBurstDeadline {
+        state.watchdogBurstDeadline = deadline
+      }
     }
   }
 
   private func handleTapDisabledEvent(_ type: CGEventType) {
     let reason = type == .tapDisabledByTimeout ? "timeout" : "userInput"
     logger.error("Event tap disabled by \(reason); scheduling restart.")
+    requestWatchdogBurst()
     Task { [weak self] in
       guard let self else { return }
       await self.refreshMonitoringState(reason: "tap_disabled_\(reason)")
@@ -512,31 +566,32 @@ class KeyEventMonitorClientLive {
 
   private func processEvent<T>(
     _ event: T,
-    handlers: () -> [UUID: @Sendable (T) -> Bool]
+    handlers: [@Sendable (T) -> Bool]
   ) -> Bool {
-    let handlerList = readState { Array(handlers().values) }
-    return handlerList.reduce(false) { handled, handler in
+    handlers.reduce(false) { handled, handler in
       handler(event) || handled
     }
   }
 
   private func processKeyEvent(_ keyEvent: KeyEvent) -> Bool {
-    processEvent(keyEvent, handlers: { continuations })
+    processEvent(keyEvent, handlers: eventTapState.withLock { $0.keyHandlers })
   }
 
   private func processInputEvent(_ inputEvent: InputEvent) -> Bool {
-    processEvent(inputEvent, handlers: { inputContinuations })
+    processEvent(inputEvent, handlers: eventTapState.withLock { $0.inputHandlers })
   }
 
   /// Records that an event was delivered to the tap. Key events are proof that Input
   /// Monitoring is genuinely granted even when `IOHIDCheckAccess` reports otherwise (#250).
   fileprivate func noteEventDelivered(type: CGEventType) {
     guard type == .keyDown || type == .keyUp else { return }
-    let alreadyProven = readState { inputMonitoringProvenByEvents }
+    let alreadyProven = eventTapState.withLock { $0.inputMonitoringProof }
     guard !alreadyProven else { return }
     queue.async(flags: .barrier) { [weak self] in
-      self?.inputMonitoringProvenByEvents = true
-      self?.inputMonitoringTrusted = true
+      guard let self = self else { return }
+      self.inputMonitoringProvenByEvents = true
+      self.inputMonitoringTrusted = true
+      self.eventTapState.withLock { $0.inputMonitoringProof = true }
     }
     if IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) != kIOHIDAccessTypeGranted {
       logger.notice("Key events are flowing while IOHIDCheckAccess reports denied; treating Input Monitoring as granted (stale TCC cache, #250).")
@@ -553,6 +608,7 @@ class KeyEventMonitorClientLive {
     ]
     for (name, reason) in events {
       let observer = center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+        self?.requestWatchdogBurst()
         self?.restartTapAfterSystemEvent(reason: reason)
       }
       systemEventObservers.append(observer)

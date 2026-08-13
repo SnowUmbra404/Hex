@@ -19,6 +19,7 @@ class InvisibleWindow: NSPanel {
   override var canBecomeMain: Bool { false }
 
   private var currentScreen: NSScreen?
+  private var cachedScreens: [NSScreen] = []
   private var mouseMonitor: Any?
 
   init() {
@@ -41,6 +42,7 @@ class InvisibleWindow: NSPanel {
 
     // Set initial frame
     updateToScreenWithMouse()
+    refreshCachedScreens()
 
     // Start observing screen changes
     NotificationCenter.default.addObserver(
@@ -80,8 +82,9 @@ class InvisibleWindow: NSPanel {
 
   private func checkForScreenChange() {
     let mouseLocation = NSEvent.mouseLocation
-    guard let newScreen = NSScreen.screens.first(where: { $0.frame.contains(mouseLocation) }) else { return }
-    
+    let screens = cachedScreens.isEmpty ? NSScreen.screens : cachedScreens
+    guard let newScreen = screens.first(where: { $0.frame.contains(mouseLocation) }) else { return }
+
     // Only update if screen actually changed
     if newScreen !== currentScreen {
       currentScreen = newScreen
@@ -89,7 +92,12 @@ class InvisibleWindow: NSPanel {
     }
   }
 
+  private func refreshCachedScreens() {
+    cachedScreens = NSScreen.screens
+  }
+
   @objc private func screenDidChange(_: Notification) {
+    refreshCachedScreens()
     updateToScreenWithMouse()
   }
 }
