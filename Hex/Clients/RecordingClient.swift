@@ -1238,6 +1238,13 @@ actor RecordingClientLive {
   }
 
   func startRecording() async {
+    // Stale start after quick-release discard/cancel: TCA cancels the start task,
+    // but a cancelled task can still reach the actor after stop already ran idle.
+    // Opening the engine here would orphan the mic (no pill, orange dot stuck).
+    guard !Task.isCancelled else {
+      recordingLogger.notice("Ignoring stale startRecording after cancel/discard")
+      return
+    }
     let sessionID = UUID()
     recordingSessionID = sessionID
     // A pending environment-change debounce is superseded: the start path below applies
