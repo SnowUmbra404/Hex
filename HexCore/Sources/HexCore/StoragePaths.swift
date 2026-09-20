@@ -41,7 +41,7 @@ public extension URL {
 	/// FluidAudio writes to `<Application Support>/FluidAudio/Models/<variant>` in
 	/// the sandboxed container, regardless of `XDG_CACHE_HOME`. We surface that
 	/// location so "Show in Finder" can reveal Parakeet caches instead of the
-	/// WhisperKit-only models directory.
+	/// legacy on-disk models directory.
 	static var hexParakeetModelsDirectory: URL {
 		get throws {
 			let fm = FileManager.default

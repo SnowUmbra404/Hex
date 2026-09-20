@@ -565,7 +565,7 @@ actor RecordingClientLive {
       reason: "audio-devices-changed"
     )
 
-    recordingLogger.notice("Installed recording environment observers")
+    recordingLogger.debug("Installed recording environment observers")
   }
 
   private func installAudioHardwareObserver(
@@ -926,7 +926,7 @@ actor RecordingClientLive {
     if status != 0 {
       recordingLogger.error("Failed to set default input device: \(status)")
     } else {
-      recordingLogger.notice("Selected input device set to \(deviceID)")
+      recordingLogger.debug("Selected input device set to \(deviceID)")
     }
   }
 
@@ -1026,13 +1026,13 @@ actor RecordingClientLive {
     let currentDefaultDevice = getDefaultInputDevice()
 
     if let primedDevice = lastPrimedDeviceID, primedDevice != currentDefaultDevice {
-      recordingLogger.notice("Default input changed from \(primedDevice) to \(currentDefaultDevice ?? 0); invalidating primed state")
+      recordingLogger.debug("Default input changed from \(primedDevice) to \(currentDefaultDevice ?? 0); invalidating primed state")
       invalidatePrimedState()
     }
 
     if let targetDeviceID {
       if targetDeviceID != currentDefaultDevice {
-        recordingLogger.notice("Switching input device from \(currentDefaultDevice ?? 0) to \(targetDeviceID)")
+        recordingLogger.debug("Switching input device from \(currentDefaultDevice ?? 0) to \(targetDeviceID)")
         setInputDevice(deviceID: targetDeviceID)
         invalidatePrimedState()
       } else {
@@ -1291,7 +1291,7 @@ actor RecordingClientLive {
         }
       }
 
-    case (.mute, true):
+    case (.mute, _):
       // Mute system volume in background
       mediaControlTask = Task { [sessionID] in
         guard await self.isCurrentSession(sessionID) else { return }

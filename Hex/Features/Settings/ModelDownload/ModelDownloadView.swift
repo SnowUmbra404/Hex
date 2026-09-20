@@ -401,6 +401,14 @@ private struct ModelLibrarySheet: View {
 	private func select(_ model: CuratedModelInfo) {
 		guard model.isDownloaded, !store.isDownloading else { return }
 		store.send(.selectModel(model.internalName))
+		// Parakeet hygiene: both variants (~650MB each) can sit on disk after a
+		// switch. Offer to remove the non-selected one via the existing
+		// remove-download confirmation below. Never auto-deletes.
+		if model.isParakeet,
+		   let other = store.curatedModels.first(where: { $0.isParakeet && $0.id != model.id && $0.isDownloaded })
+		{
+			pendingDelete = other
+		}
 	}
 
 	@ViewBuilder

@@ -19,8 +19,7 @@ brew install --cask kitlangton-hex
 ```
 
 The Swift version supports [Parakeet TDT v3](https://github.com/FluidInference/FluidAudio)
-through [FluidAudio](https://github.com/FluidInference/FluidAudio) and
-[WhisperKit](https://github.com/argmaxinc/WhisperKit) for on-device transcription.
+through [FluidAudio](https://github.com/FluidInference/FluidAudio) for on-device transcription.
 It uses the [Swift Composable Architecture](https://github.com/pointfreeco/swift-composable-architecture).
 
 ## Instructions

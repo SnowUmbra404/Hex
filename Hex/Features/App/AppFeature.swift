@@ -220,6 +220,25 @@ struct AppFeature {
     .run { send in
       @Shared(.hexSettings) var hexSettings: HexSettings
       @Shared(.modelBootstrapState) var modelBootstrapState: ModelBootstrapState
+      // Parakeet-only migration: always clean up the orphaned Whisper model
+      // dir, even if the selection already points at Parakeet.
+      if let modelsDir = try? URL.hexModelsDirectory {
+        let legacyDir = modelsDir
+          .appendingPathComponent("argmaxinc")
+          .appendingPathComponent("whisperkit-coreml", isDirectory: true)
+        if FileManager.default.fileExists(atPath: legacyDir.path) {
+          try? FileManager.default.removeItem(at: legacyDir)
+          HexLog.app.notice("Removed orphaned Whisper model directory")
+        }
+      }
+      // Legacy Whisper selections fall back to the Parakeet default.
+      if !hexSettings.selectedModel.isEmpty,
+         ParakeetModel(rawValue: hexSettings.selectedModel) == nil
+      {
+        let previous = hexSettings.selectedModel
+        $hexSettings.withLock { $0.selectedModel = ParakeetModel.multilingualV3.identifier }
+        HexLog.app.notice("Migrated legacy model selection '\(previous)' to Parakeet default")
+      }
       let selectedModel = hexSettings.selectedModel
       guard !selectedModel.isEmpty else {
         await send(.modelStatusEvaluated(false))

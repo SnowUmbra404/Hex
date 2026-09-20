@@ -28,20 +28,37 @@ struct KeyEventMonitorToken: Sendable {
   static let noop = KeyEventMonitorToken(cancel: {})
 }
 
+/// Sauce key lookup cache: resolving via the input source must hop to main and re-reads
+/// layout data, stalling the CGEvent tap on every keyDown under main-thread load.
+/// Bounded to the 256-entry key-code space; cleared when the input source changes.
+private enum KeyCodeLookup {
+  private static let cache = OSAllocatedUnfairLock<[Int: Key]>(initialState: [:])
+  private static let registerInvalidation: Void = {
+    let name = Notification.Name(kTISNotifySelectedKeyboardInputSourceChanged as String)
+    _ = DistributedNotificationCenter.default().addObserver(forName: name, object: nil, queue: nil) { _ in
+      cache.withLock { $0.removeAll() }
+    }
+  }()
+
+  static func key(for keyCode: Int) -> Key? {
+    _ = registerInvalidation
+    if let hit = cache.withLock({ $0[keyCode] }) { return hit }
+    // Accessing keyboard layout / input source via Sauce must be on main thread.
+    let resolved: Key?
+    if Thread.isMainThread {
+      resolved = Sauce.shared.key(for: keyCode)
+    } else {
+      resolved = DispatchQueue.main.sync { Sauce.shared.key(for: keyCode) }
+    }
+    if let resolved, keyCode < 256 { cache.withLock { $0[keyCode] = resolved } }
+    return resolved
+  }
+}
+
 public extension KeyEvent {
   init(cgEvent: CGEvent, type: CGEventType, isFnPressed: Bool) {
     let keyCode = Int(cgEvent.getIntegerValueField(.keyboardEventKeycode))
-    // Accessing keyboard layout / input source via Sauce must be on main thread.
-    let key: Key?
-    if cgEvent.type == .keyDown {
-      if Thread.isMainThread {
-        key = Sauce.shared.key(for: keyCode)
-      } else {
-        key = DispatchQueue.main.sync { Sauce.shared.key(for: keyCode) }
-      }
-    } else {
-      key = nil
-    }
+    let key: Key? = cgEvent.type == .keyDown ? KeyCodeLookup.key(for: keyCode) : nil
 
     var modifiers = Modifiers.from(carbonFlags: cgEvent.flags)
     if !isFnPressed {

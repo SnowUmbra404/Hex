@@ -20,7 +20,6 @@ class InvisibleWindow: NSPanel {
 
   private var currentScreen: NSScreen?
   private var cachedScreens: [NSScreen] = []
-  private var mouseMonitor: Any?
 
   init() {
     let screen = NSScreen.main ?? NSScreen.screens[0]
@@ -59,18 +58,10 @@ class InvisibleWindow: NSPanel {
       name: NSApplication.didChangeScreenParametersNotification,
       object: nil
     )
-
-    // Monitor mouse movements to detect screen boundary crossings
-    mouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: .mouseMoved) { [weak self] _ in
-      self?.checkForScreenChange()
-    }
   }
 
   deinit {
     NotificationCenter.default.removeObserver(self)
-    if let monitor = mouseMonitor {
-      NSEvent.removeMonitor(monitor)
-    }
   }
 
   private func updateToScreenWithMouse() {

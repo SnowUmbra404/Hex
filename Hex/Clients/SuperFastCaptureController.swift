@@ -57,11 +57,6 @@ private struct SuperFastCaptureConstants {
   static let ringBufferDuration: TimeInterval = 1.0
   static let defaultPreRollDuration: TimeInterval = 0.45
   static let tapBufferSize: AVAudioFrameCount = 2_048
-  static let fallbackStopGracePeriod: TimeInterval = 0.05
-  static let minimumStopGracePeriod: TimeInterval = 0.02
-  static let maximumStopGracePeriod: TimeInterval = 0.08
-  static let stopGraceSafetyMargin: TimeInterval = 0.008
-  static let callbackTimingWindowSize = 8
 }
 
 enum CaptureRecordingMode: String {
@@ -87,12 +82,6 @@ final class SuperFastCaptureController {
     case captured(URL)
     case failed(RecordingFailure)
     case idle
-  }
-
-  struct StopTimingEstimate {
-    let gracePeriod: TimeInterval
-    let callbackInterval: TimeInterval
-    let bufferDuration: TimeInterval
   }
 
   private struct ActiveRecording {
@@ -123,9 +112,6 @@ final class SuperFastCaptureController {
   private var captureGeneration = 0
   private var recordingFailure: RecordingFailure?
   private var keepWarmBuffer = false
-  private var lastProcessedBufferAt: Date?
-  private var recentCallbackIntervals: [TimeInterval] = []
-  private var recentBufferDurations: [TimeInterval] = []
   private let onEngineConfigurationChange: @Sendable (Int) -> Void
 
   init(
@@ -146,28 +132,6 @@ final class SuperFastCaptureController {
 
   var isRecording: Bool {
     processingQueue.sync { activeRecording != nil }
-  }
-
-  var stopTimingEstimate: StopTimingEstimate {
-    processingQueue.sync {
-      let callbackInterval = recentCallbackIntervals.max() ?? 0
-      let bufferDuration = recentBufferDurations.max() ?? 0
-      let observedCadence = max(callbackInterval, bufferDuration)
-      let gracePeriod = min(
-        max(
-          observedCadence > 0
-            ? observedCadence + SuperFastCaptureConstants.stopGraceSafetyMargin
-            : SuperFastCaptureConstants.fallbackStopGracePeriod,
-          SuperFastCaptureConstants.minimumStopGracePeriod
-        ),
-        SuperFastCaptureConstants.maximumStopGracePeriod
-      )
-      return StopTimingEstimate(
-        gracePeriod: gracePeriod,
-        callbackInterval: callbackInterval,
-        bufferDuration: bufferDuration
-      )
-    }
   }
 
   func startIfNeeded(reason: String = "unknown", keepWarmBuffer: Bool = false) throws {
@@ -193,7 +157,7 @@ final class SuperFastCaptureController {
   /// (#251, #252, #218, #226). The ring buffer, timing metrics, and active recording survive;
   /// only the engine, tap, and converter are rebuilt.
   func restartPreservingRecording(reason: String) throws {
-    logger.notice("Restarting capture engine preserving active recording reason=\(reason)")
+    logger.debug("Restarting capture engine preserving active recording reason=\(reason)")
     detachEngine()
     try armEngine(reason: reason)
   }
@@ -244,14 +208,14 @@ final class SuperFastCaptureController {
     ) { [weak self] _ in
       self?.handleConfigurationChange(generation: generation)
     }
-    logger.notice(
+    logger.debug(
       "Capture engine armed reason=\(reason) sampleRate=\(String(format: "%.0f", inputFormat.sampleRate))Hz channels=\(inputFormat.channelCount) ringBuffer=\(String(format: "%.2f", SuperFastCaptureConstants.ringBufferDuration))s defaultPreRoll=\(String(format: "%.2f", SuperFastCaptureConstants.defaultPreRollDuration))s"
     )
   }
 
   func stop(reason: String = "unknown") {
     if engine != nil {
-      logger.notice("Capture engine stopped reason=\(reason)")
+      logger.debug("Capture engine stopped reason=\(reason)")
     }
     detachEngine(clearingRecordingState: true)
   }
@@ -275,9 +239,6 @@ final class SuperFastCaptureController {
         activeRecording = nil
         recordingFailure = nil
         ringBuffer.clear()
-        lastProcessedBufferAt = nil
-        recentCallbackIntervals.removeAll(keepingCapacity: false)
-        recentBufferDurations.removeAll(keepingCapacity: false)
       }
     }
     engine?.stop()
@@ -288,7 +249,7 @@ final class SuperFastCaptureController {
     guard processingQueue.sync(execute: { Self.shouldProcessCallback(callbackGeneration: generation, currentGeneration: captureGeneration) }) else {
       return
     }
-    logger.notice("Capture engine configuration changed")
+    logger.debug("Capture engine configuration changed")
     onEngineConfigurationChange(generation)
   }
 
@@ -380,13 +341,6 @@ final class SuperFastCaptureController {
     guard Self.shouldProcessCallback(callbackGeneration: generation, currentGeneration: captureGeneration) else {
       return
     }
-    let now = Date()
-    if let lastProcessedBufferAt {
-      appendRecentMetric(now.timeIntervalSince(lastProcessedBufferAt), to: &recentCallbackIntervals)
-    }
-    lastProcessedBufferAt = now
-    appendRecentMetric(Double(buffer.frameLength) / buffer.format.sampleRate, to: &recentBufferDurations)
-
     guard let converted = convert(buffer),
           converted.frameLength > 0,
           let samples = converted.floatChannelData?[0]
@@ -515,13 +469,5 @@ final class SuperFastCaptureController {
     }
 
     return copy
-  }
-
-  private func appendRecentMetric(_ value: TimeInterval, to metrics: inout [TimeInterval]) {
-    guard value.isFinite, value > 0 else { return }
-    metrics.append(value)
-    if metrics.count > SuperFastCaptureConstants.callbackTimingWindowSize {
-      metrics.removeFirst(metrics.count - SuperFastCaptureConstants.callbackTimingWindowSize)
-    }
   }
 }

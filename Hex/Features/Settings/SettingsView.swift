@@ -26,10 +26,6 @@ struct SettingsView: View {
 			}
 
 			ModelSectionView(store: store, shouldFlash: store.shouldFlashModelSection)
-			// Only show language picker for WhisperKit models (not Parakeet)
-			if ParakeetModel(rawValue: store.hexSettings.selectedModel) == nil {
-				LanguageSectionView(store: store)
-			}
 
 			HotKeySectionView(store: store)
           

@@ -298,7 +298,7 @@ public struct ModelDownloadFeature {
 
 		case let .modelsLoaded(recommended, available):
 			state.isLoadingModels = false
-			// Ensure our curated Parakeet options are visible even if WhisperKit doesn't list them
+			// Ensure our curated Parakeet options are visible even if the fetch doesn't list them
 			var availablePlus = available
 			for model in ParakeetModel.allCases.reversed() {
 				if !availablePlus.contains(where: { $0.name == model.identifier }) {
@@ -501,15 +501,11 @@ public struct ModelDownloadFeature {
 	// MARK: Helpers
 
 	private func openModelLocationEffect(for model: String) -> Effect<Action> {
-		// Parakeet caches live under FluidAudio's directory, not the WhisperKit
-		// models folder. Route "Show in Finder" to the matching root so users
-		// don't end up staring at an empty WhisperKit folder thinking the
-		// Parakeet download silently failed.
-		let usesParakeetRoot = ParakeetModel(rawValue: model) != nil
+		// Parakeet caches live under FluidAudio's directory. Route "Show in Finder"
+		// there so users don't end up staring at an empty models folder thinking
+		// the Parakeet download silently failed.
 		return .run { _ in
-			let base = try usesParakeetRoot
-				? URL.hexParakeetModelsDirectory
-				: URL.hexModelsDirectory
+			let base = try URL.hexParakeetModelsDirectory
 			NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: base.path)
 		}
 	}

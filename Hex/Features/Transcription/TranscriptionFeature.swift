@@ -13,7 +13,6 @@ import HexCore
 import Inject
 #endif
 import SwiftUI
-import WhisperKit
 
 private let transcriptionFeatureLogger = HexLog.transcription
 

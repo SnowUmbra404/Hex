@@ -4,7 +4,7 @@ This file provides guidance for coding agents working in this repo.
 
 ## Project Overview
 
-Hex is a macOS menu bar application for on‑device voice‑to‑text. It supports Whisper (Core ML via WhisperKit) and Parakeet TDT v3 (Core ML via FluidAudio). Users activate transcription with hotkeys; text can be auto‑pasted into the active app.
+Hex is a macOS menu bar application for on‑device voice‑to‑text. It uses Parakeet TDT v3 (Core ML via FluidAudio). Users activate transcription with hotkeys; text can be auto‑pasted into the active app.
 
 ## Build & Development Commands
 
@@ -33,14 +33,13 @@ The app uses **The Composable Architecture (TCA)** for state management. Key arc
 - `HistoryFeature`: Transcription history management
 
 ### Dependency Clients
-- `TranscriptionClient`: WhisperKit integration for ML transcription
+- `TranscriptionClient`: Parakeet integration for ML transcription
 - `RecordingClient`: AVAudioRecorder wrapper for audio capture
 - `PasteboardClient`: Clipboard operations
 - `KeyEventMonitorClient`: Global hotkey monitoring via Sauce framework
 
 ### Key Dependencies
-- **WhisperKit**: Core ML transcription (tracking main branch)
-- **FluidAudio (Parakeet)**: Core ML ASR (multilingual) default model
+- **FluidAudio (Parakeet)**: Core ML ASR (multilingual) model
 - **Sauce**: Keyboard event monitoring
 - **Sparkle**: Auto-updates (feed: https://hex-updates.s3.amazonaws.com/appcast.xml)
 - **Swift Composable Architecture**: State management
@@ -54,7 +53,7 @@ The app uses **The Composable Architecture (TCA)** for state management. Key arc
    - Mouse clicks and extra modifiers are discarded within threshold, ignored after
    - Only ESC cancels recordings after the threshold
 
-2. **Model Management**: Models are managed by `ModelDownloadFeature`. Curated defaults live in `Hex/Resources/Data/models.json`. The Settings UI shows a compact opinionated list (Parakeet + three Whisper sizes). No dropdowns.
+2. **Model Management**: Models are managed by `ModelDownloadFeature`. Curated defaults live in `Hex/Resources/Data/models.json`. The Settings UI shows a compact opinionated list (Parakeet variants). No dropdowns.
 
 3. **Sound Effects**: Audio feedback is provided via `SoundEffect.swift` using files in `Resources/Audio/`
 
@@ -67,13 +66,12 @@ The app uses **The Composable Architecture (TCA)** for state management. Key arc
 ## Models (2025‑11)
 
 - Default: Parakeet TDT v3 (multilingual) via FluidAudio
-- Additional curated: Whisper Small (Tiny), Whisper Medium (Base), Whisper Large v3
-- Note: Distil‑Whisper is English‑only and not shown by default
+- Also curated: Parakeet TDT v2 (English)
 
 ### Storage Locations
 
-- WhisperKit models
-  - `~/Library/Application Support/com.kitlangton.Hex/models/argmaxinc/whisperkit-coreml/<model>`
+- Legacy on-disk models (removed)
+  - `~/Library/Application Support/com.kitlangton.Hex/models/argmaxinc/whisperkit-coreml/<model>` (deleted on launch by migration)
 - Parakeet (FluidAudio)
   - We set `XDG_CACHE_HOME` on launch so Parakeet caches under the app container:
   - `~/Library/Containers/com.kitlangton.Hex/Data/Library/Application Support/FluidAudio/Models/parakeet-tdt-0.6b-v3-coreml`
@@ -81,7 +79,6 @@ The app uses **The Composable Architecture (TCA)** for state management. Key arc
 
 ### Progress + Availability
 
-- WhisperKit: native progress
 - Parakeet: best‑effort progress by polling the model directory size during download
 - Availability detection scans both `Application Support/FluidAudio/Models` and our app cache path
 
@@ -91,7 +88,6 @@ The app uses **The Composable Architecture (TCA)** for state management. Key arc
 
 ### Packages
 
-- WhisperKit: `https://github.com/argmaxinc/WhisperKit`
 - FluidAudio: `https://github.com/FluidInference/FluidAudio.git` (link `FluidAudio` to Hex target)
 
 ### Entitlements (Sandbox)
