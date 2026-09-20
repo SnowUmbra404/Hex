@@ -34,13 +34,25 @@ jobs:
           key: hex-spm-${{ runner.os }}-${{ hashFiles('HexCore/Package.resolved') }}
           restore-keys: |
             hex-spm-${{ runner.os }}-
-          save-always: true
+
+      - name: Record Xcode version
+        id: xcode
+        run: echo "version=$(xcodebuild -version | head -1 | tr ' ' '_')" >> "$GITHUB_OUTPUT"
+
+      - name: Cache DerivedData intermediates
+        uses: actions/cache@v4
+        with:
+          path: |
+            .build/DerivedData/Build/Intermediates.noindex
+            .build/DerivedData/ModuleCache.noindex
+          key: hex-dd-${{ runner.os }}-${{ steps.xcode.outputs.version }}-${{ hashFiles('HexCore/Package.resolved', 'Hex/Hex.xcodeproj/project.pbxproj') }}
+          restore-keys: |
+            hex-dd-${{ runner.os }}-${{ steps.xcode.outputs.version }}-
+            hex-dd-${{ runner.os }}-
 
       - name: Diagnose coverage settings
         run: |
-          xcodebuild -scheme Hex -configuration Release -showBuildSettings 2>/dev/null | grep -iE "COVERAGE|PROFILE|OTHER_SWIFT_FLAGS" || echo "no coverage-related settings resolve"
-          echo "---"
-          xcodebuild -scheme Hex -configuration Release -showBuildSettings 2>/dev/null | grep -iE "^ *CLANG_ENABLE_CODE_COVERAGE|CLANG_COVERAGE_MAPPING"
+          xcodebuild -scheme Hex -configuration Release -showBuildSettings 2>/dev/null | grep -iE "COVERAGE|PROFILE|OTHER_SWIFT_FLAGS|CLANG_COVERAGE_MAPPING" || echo "no coverage-related settings resolve"
 
       - name: Kill orphan ibtoold processes
         run: |
