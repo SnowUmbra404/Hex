@@ -1,5 +1,7 @@
 import SwiftUI
+#if DEBUG
 import Inject
+#endif
 #if canImport(ComposableArchitecture)
 	import ComposableArchitecture
 #endif

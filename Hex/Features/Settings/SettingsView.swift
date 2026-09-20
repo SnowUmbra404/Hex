@@ -1,6 +1,8 @@
 import ComposableArchitecture
 import HexCore
+#if DEBUG
 import Inject
+#endif
 import SwiftUI
 
 struct SettingsView: View {
@@ -12,14 +14,6 @@ struct SettingsView: View {
   
 	var body: some View {
 		Form {
-			if RustBetaAnnouncement.isAvailable && !store.hexSettings.hasDismissedRustBetaBanner {
-				Section {
-					RustBetaBannerView {
-						store.send(.dismissRustBetaBanner)
-					}
-				}
-			}
-
 			if microphonePermission != .granted
 				|| accessibilityPermission != .granted
 				|| inputMonitoringPermission != .granted {

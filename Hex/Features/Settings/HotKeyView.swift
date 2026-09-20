@@ -6,7 +6,9 @@
 //
 
 import HexCore
+#if DEBUG
 import Inject
+#endif
 import Sauce
 import SwiftUI
 

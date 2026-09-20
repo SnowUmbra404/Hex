@@ -1,5 +1,6 @@
 import ComposableArchitecture
 import HexCore
+import Observation
 import SwiftUI
 
 private let appLogger = HexLog.app
@@ -25,7 +26,6 @@ class HexAppDelegate: NSObject, NSApplicationDelegate {
 		}
 
 		Task {
-			await soundEffect.preloadSounds()
 			await soundEffect.setEnabled(hexSettings.soundEffectsEnabled)
 		}
 		launchedAtLogin = wasLaunchedAtLogin()
@@ -52,11 +52,18 @@ class HexAppDelegate: NSObject, NSApplicationDelegate {
 		// Start long-running app effects (global hotkeys, permissions, etc.)
 		startLifecycleTasksIfNeeded()
 
-		// Then present main views
-		presentMainView()
+		// Then present main views lazily: the pill window is created on first
+		// recording and torn down after, so no full-screen panel or mouse
+		// monitor is alive while idle.
+		observePillVisibility()
 
 		guard shouldOpenForegroundUIOnLaunch else {
 			appLogger.notice("Suppressing foreground windows for login launch")
+			return
+		}
+
+		// True first launch only (no persisted settings yet); otherwise stay menu-bar only.
+		guard isFirstLaunch else {
 			return
 		}
 
@@ -70,6 +77,10 @@ class HexAppDelegate: NSObject, NSApplicationDelegate {
 		// background launch; the Settings window can be opened later from the
 		// menu bar item or ⌘, when needed.
 		!launchedAtLogin
+	}
+
+	private var isFirstLaunch: Bool {
+		!FileManager.default.fileExists(atPath: URL.hexSettingsURL.path)
 	}
 
 	private func wasLaunchedAtLogin() -> Bool {
@@ -100,6 +111,8 @@ class HexAppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+	/// Creates the pill window on first use. Idempotent: safe to call whenever
+	/// the pill becomes visible.
 	func presentMainView() {
 		guard invisibleWindow == nil else {
 			return
@@ -109,6 +122,42 @@ class HexAppDelegate: NSObject, NSApplicationDelegate {
 			.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
 		invisibleWindow = InvisibleWindow.fromView(transcriptionView)
 		invisibleWindow?.orderFrontRegardless()
+	}
+
+	/// Tears down the pill window after recording/transcription finishes,
+	/// releasing the full-screen panel and its mouse monitor.
+	func dismissPillWindow() {
+		invisibleWindow?.orderOut(nil)
+		invisibleWindow = nil
+	}
+
+	/// Pill visibility derived from transcription state. Observation drives the
+	/// window lifecycle: created on first recording, torn down after.
+	/// Nonisolated like SwiftUI view accesses so it can be read inside
+	/// `withObservationTracking` (which executes on the main thread here).
+	private var isPillVisible: Bool {
+		let transcription = HexApp.appStore.transcription
+		return transcription.isRecording || transcription.isTranscribing || transcription.isPrewarming
+	}
+
+	private func observePillVisibility() {
+		Task { @MainActor [weak self] in
+			guard let self else { return }
+			while !Task.isCancelled {
+				await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+					let visible = withObservationTracking {
+						self.isPillVisible
+					} onChange: {
+						continuation.resume()
+					}
+					if visible {
+						self.presentMainView()
+					} else {
+						self.dismissPillWindow()
+					}
+				}
+			}
+		}
 	}
 
 	func presentSettingsView() {

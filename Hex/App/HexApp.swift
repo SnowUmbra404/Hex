@@ -1,5 +1,7 @@
 import ComposableArchitecture
+#if DEBUG
 import Inject
+#endif
 import Sparkle
 import AppKit
 import SwiftUI
@@ -52,3 +54,15 @@ struct HexApp: App {
 		}
 	}
 }
+
+#if !DEBUG
+// ponytail: Release excludes Inject (hot-reload is Debug-only); no-op shims so call sites compile unchanged. If Inject is ever needed in Release, delete this and link the package for all configs.
+@propertyWrapper
+struct ObserveInjection: DynamicProperty {
+    var wrappedValue: Void { () }
+}
+
+extension View {
+    func enableInjection() -> some View { self }
+}
+#endif

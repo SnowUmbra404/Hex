@@ -1,6 +1,8 @@
 import Combine
 import ComposableArchitecture
+#if DEBUG
 import Inject
+#endif
 import Sparkle
 import SwiftUI
 

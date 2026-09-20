@@ -59,17 +59,37 @@ class InvisibleWindow: NSPanel {
       name: NSApplication.didChangeScreenParametersNotification,
       object: nil
     )
+  }
 
-    // Monitor mouse movements to detect screen boundary crossings
+  deinit {
+    NotificationCenter.default.removeObserver(self)
+    stopMouseMonitor()
+  }
+
+  // The mouse monitor only runs while the window is visible. It exists to
+  // detect screen-boundary crossings on multi-monitor setups; screen
+  // Notifications (observed above) cover everything else.
+  override func orderFrontRegardless() {
+    super.orderFrontRegardless()
+    startMouseMonitor()
+  }
+
+  override func orderOut(_ sender: Any?) {
+    stopMouseMonitor()
+    super.orderOut(sender)
+  }
+
+  private func startMouseMonitor() {
+    guard mouseMonitor == nil else { return }
     mouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: .mouseMoved) { [weak self] _ in
       self?.checkForScreenChange()
     }
   }
 
-  deinit {
-    NotificationCenter.default.removeObserver(self)
+  private func stopMouseMonitor() {
     if let monitor = mouseMonitor {
       NSEvent.removeMonitor(monitor)
+      mouseMonitor = nil
     }
   }
 

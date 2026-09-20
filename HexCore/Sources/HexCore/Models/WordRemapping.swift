@@ -19,24 +19,48 @@ public struct WordRemapping: Codable, Equatable, Identifiable, Sendable {
 	}
 }
 
+private struct CompiledRemapping: Sendable {
+	let regex: NSRegularExpression
+	let template: String
+}
+
 public enum WordRemappingApplier {
+	private static let lock = NSLock()
+	private nonisolated(unsafe) static var cachedRules: [WordRemapping]?
+	private nonisolated(unsafe) static var cachedCompiled: [CompiledRemapping] = []
+
 	public static func apply(_ text: String, remappings: [WordRemapping]) -> String {
 		guard !remappings.isEmpty else { return text }
+		let compiled = compiledRules(for: remappings)
+		guard !compiled.isEmpty else { return text }
 		var output = text
-		for remapping in remappings where remapping.isEnabled {
-			let trimmed = remapping.match.trimmingCharacters(in: .whitespacesAndNewlines)
-			guard !trimmed.isEmpty else { continue }
-			let escaped = NSRegularExpression.escapedPattern(for: trimmed)
-			let pattern = "(?<!\\w)\(escaped)(?!\\w)"
-			let replacement = processEscapeSequences(remapping.replacement)
-			let escapedReplacement = NSRegularExpression.escapedTemplate(for: replacement)
-			output = output.replacingOccurrences(
-				of: pattern,
-				with: escapedReplacement,
-				options: [.regularExpression, .caseInsensitive]
-			)
+		for rule in compiled {
+			let range = NSRange(output.startIndex..., in: output)
+			output = rule.regex.stringByReplacingMatches(in: output, range: range, withTemplate: rule.template)
 		}
 		return output
+	}
+
+	/// Precompiled regexes for the current rules list; recompiled when settings change.
+	private static func compiledRules(for remappings: [WordRemapping]) -> [CompiledRemapping] {
+		lock.withLock {
+			if let cachedRules, cachedRules == remappings { return cachedCompiled }
+			let compiled: [CompiledRemapping] = remappings.compactMap { remapping in
+				guard remapping.isEnabled else { return nil }
+				let trimmed = remapping.match.trimmingCharacters(in: .whitespacesAndNewlines)
+				guard !trimmed.isEmpty else { return nil }
+				let escaped = NSRegularExpression.escapedPattern(for: trimmed)
+				guard let regex = try? NSRegularExpression(
+					pattern: "(?<!\\w)\(escaped)(?!\\w)",
+					options: [.caseInsensitive]
+				) else { return nil }
+				let replacement = processEscapeSequences(remapping.replacement)
+				return CompiledRemapping(regex: regex, template: NSRegularExpression.escapedTemplate(for: replacement))
+			}
+			cachedRules = remappings
+			cachedCompiled = compiled
+			return compiled
+		}
 	}
 
 	/// Processes escape sequences in a string: `\n` → newline, `\t` → tab, `\\` → backslash

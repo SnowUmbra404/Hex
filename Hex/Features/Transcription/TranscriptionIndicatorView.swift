@@ -5,7 +5,9 @@
 //  Created by Kit Langton on 1/25/25.
 
 import AppKit
+#if DEBUG
 import Inject
+#endif
 import Pow
 import SwiftUI
 

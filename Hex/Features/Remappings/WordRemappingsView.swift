@@ -1,6 +1,8 @@
 import ComposableArchitecture
 import HexCore
+#if DEBUG
 import Inject
+#endif
 import SwiftUI
 
 struct WordRemappingsView: View {

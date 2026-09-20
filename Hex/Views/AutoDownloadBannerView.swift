@@ -1,4 +1,6 @@
+#if DEBUG
 import Inject
+#endif
 import SwiftUI
 
 struct AutoDownloadBannerView: View {

@@ -9,7 +9,9 @@ import ComposableArchitecture
 import CoreGraphics
 import Foundation
 import HexCore
+#if DEBUG
 import Inject
+#endif
 import SwiftUI
 import WhisperKit
 

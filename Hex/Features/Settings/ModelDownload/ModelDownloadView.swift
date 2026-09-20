@@ -1,6 +1,8 @@
 import ComposableArchitecture
 import HexCore
+#if DEBUG
 import Inject
+#endif
 import SwiftUI
 
 private func modelNamesMatch(_ lhs: String, _ rhs: String) -> Bool {
@@ -440,7 +442,9 @@ private struct ModelLibrarySheet: View {
 
 	private var otherLibraryModels: [CuratedModelInfo] {
 		guard let recommendedLibraryModel else { return Array(store.curatedModels) }
-		return store.curatedModels.filter { $0.id != recommendedLibraryModel.id }
+		// Hidden models (e.g. 1.5GB Large v3) stay out of the browse list unless
+		// already downloaded, so existing installs keep working.
+		return store.curatedModels.filter { $0.id != recommendedLibraryModel.id && ($0.isDownloaded || !$0.isHidden) }
 	}
 
 	private func isSelected(_ model: CuratedModelInfo) -> Bool {

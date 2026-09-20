@@ -1,5 +1,7 @@
 import SwiftUI
+#if DEBUG
 import Inject
+#endif
 import MarkdownUI
 
 struct ChangelogView: View {

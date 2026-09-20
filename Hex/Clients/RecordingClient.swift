@@ -1255,9 +1255,10 @@ actor RecordingClientLive {
     mediaControlTask?.cancel()
     mediaControlTask = nil
 
-    // Handle audio behavior based on user preference
-    switch hexSettings.recordingAudioBehavior {
-    case .pauseMedia:
+    // Cheap gate: only touch media when something is actually playing, so the
+    // AppleScript/media-key machinery below never runs on a silent start.
+    switch (hexSettings.recordingAudioBehavior, await isAudioPlayingOnDefaultOutput()) {
+    case (.pauseMedia, true):
       // Pause media in background - don't block recording from starting
       mediaControlTask = Task { [sessionID] in
         guard await self.isCurrentSession(sessionID) else { return }
@@ -1290,7 +1291,7 @@ actor RecordingClientLive {
         }
       }
 
-    case .mute:
+    case (.mute, true):
       // Mute system volume in background
       mediaControlTask = Task { [sessionID] in
         guard await self.isCurrentSession(sessionID) else { return }
@@ -1302,8 +1303,8 @@ actor RecordingClientLive {
         await self.setPreviousVolume(volume, sessionID: sessionID)
       }
 
-    case .doNothing:
-      // No audio handling
+    default:
+      // .doNothing, or nothing playing — no audio handling
       break
     }
 
@@ -1363,11 +1364,10 @@ actor RecordingClientLive {
     let activeSession = activeRecordingSession
 
     if activeSession?.backend == .captureEngine || captureController.isRecording {
-      let stopTimingEstimate = captureController.stopTimingEstimate
-      recordingLogger.debug(
-        "Waiting \(self.formatDuration(stopTimingEstimate.gracePeriod)) before finalizing capture-engine recording callbackInterval=\(self.formatDuration(stopTimingEstimate.callbackInterval)) bufferDuration=\(self.formatDuration(stopTimingEstimate.bufferDuration))"
-      )
-      try? await Task.sleep(for: .milliseconds(Int((stopTimingEstimate.gracePeriod * 1000).rounded())))
+      // Fixed 20ms grace (== minimumStopGracePeriod): one 2k-frame tap callback is
+      // enough for the in-flight buffer to land before finishRecording; the old
+      // dynamic estimate (up to 80ms) only added stop latency.
+      try? await Task.sleep(for: .milliseconds(20))
 
       if Self.shouldIgnoreStopRequest(
         snapshotSessionID: stopSessionID,
@@ -1401,7 +1401,7 @@ actor RecordingClientLive {
       }
 
       finalizeCaptureStateAfterRecording()
-      await resumeMediaIfNeeded()
+      resumeMediaIfNeeded()
       return .captured(captureURL)
 
     case let .failed(error):
@@ -1415,7 +1415,7 @@ actor RecordingClientLive {
         releaseRecorder(reason: "capture-engine-stop-failed")
       }
       finalizeCaptureStateAfterRecording()
-      await resumeMediaIfNeeded()
+      resumeMediaIfNeeded()
       return .failed(error)
 
     case .idle:
@@ -1437,7 +1437,7 @@ actor RecordingClientLive {
       clearActiveRecordingMetadata()
       lastRecordingEndedAt = stoppedAt
       finalizeCaptureStateAfterRecording()
-      await resumeMediaIfNeeded()
+      resumeMediaIfNeeded()
       return .ignored(.noActiveRecording)
     }
     recorder?.stop()
@@ -1456,7 +1456,7 @@ actor RecordingClientLive {
       releaseRecorder(reason: "fallback-export-failed")
       FileManager.default.removeItemIfExists(at: recordingURL)
       finalizeCaptureStateAfterRecording()
-      await resumeMediaIfNeeded()
+      resumeMediaIfNeeded()
       return .failed(.fallbackExportFailed(error.localizedDescription))
     }
     releaseRecorder(reason: "fallback-stop")
@@ -1466,19 +1466,36 @@ actor RecordingClientLive {
     }
 
     finalizeCaptureStateAfterRecording()
-    await resumeMediaIfNeeded()
+    resumeMediaIfNeeded()
 
     return .captured(exportedURL)
   }
 
-  private func resumeMediaIfNeeded() async {
+  /// Snapshot pending media state synchronously (exactly-once per pause) and resume
+  /// in the background so stopRecording can return .captured immediately.
+  /// Returns the resume task so termination (cleanup) can await it.
+  @discardableResult
+  private func resumeMediaIfNeeded() -> Task<Void, Never>? {
     let playersToResume = pausedPlayers
     let shouldResumeMedia = didPauseMedia
     let shouldResumeViaMediaRemote = didPauseViaMediaRemote
     let volumeToRestore = previousVolume
 
     clearMediaState()
+    guard volumeToRestore != nil || !playersToResume.isEmpty || shouldResumeViaMediaRemote || shouldResumeMedia else { return nil }
 
+    // ponytail: fire-and-forget resume; snapshot+clear above keeps it exactly-once
+    return Task.detached { [weak self] in
+      await self?.performResume(
+        playersToResume: playersToResume,
+        shouldResumeMedia: shouldResumeMedia,
+        shouldResumeViaMediaRemote: shouldResumeViaMediaRemote,
+        volumeToRestore: volumeToRestore
+      )
+    }
+  }
+
+  private func performResume(playersToResume: [String], shouldResumeMedia: Bool, shouldResumeViaMediaRemote: Bool, volumeToRestore: Float?) async {
     // Restore volume if it was muted
     if let volume = volumeToRestore {
       await restoreSystemVolume(volume)
@@ -1692,7 +1709,7 @@ actor RecordingClientLive {
   /// Release recorder resources. Call on app termination.
   func cleanup() async {
     endRecordingSession()
-    await resumeMediaIfNeeded()
+    if let resumeTask = resumeMediaIfNeeded() { await resumeTask.value }
     stopObservingSystemChanges()
     stopCaptureController(reason: "cleanup")
     releaseRecorder(reason: "cleanup")

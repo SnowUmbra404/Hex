@@ -33,6 +33,7 @@ public struct CuratedModelInfo: Equatable, Identifiable, Codable {
 	public let accuracyStars: Int
 	public let speedStars: Int
 	public let storageSize: String
+	public let isHidden: Bool
 	public var isDownloaded: Bool
 	public var id: String { internalName }
 
@@ -62,7 +63,8 @@ public struct CuratedModelInfo: Equatable, Identifiable, Codable {
 		accuracyStars: Int,
 		speedStars: Int,
 		storageSize: String,
-		isDownloaded: Bool
+		isDownloaded: Bool,
+		isHidden: Bool = false
 	) {
 		self.displayName = displayName
 		self.internalName = internalName
@@ -71,10 +73,11 @@ public struct CuratedModelInfo: Equatable, Identifiable, Codable {
 		self.speedStars = speedStars
 		self.storageSize = storageSize
 		self.isDownloaded = isDownloaded
+		self.isHidden = isHidden
 	}
 
 	// Codable (isDownloaded is set at runtime)
-	private enum CodingKeys: String, CodingKey { case displayName, internalName, size, accuracyStars, speedStars, storageSize }
+	private enum CodingKeys: String, CodingKey { case displayName, internalName, size, accuracyStars, speedStars, storageSize, isHidden }
 	public init(from decoder: Decoder) throws {
 		let c = try decoder.container(keyedBy: CodingKeys.self)
 		displayName = try c.decode(String.self, forKey: .displayName)
@@ -83,6 +86,7 @@ public struct CuratedModelInfo: Equatable, Identifiable, Codable {
 		accuracyStars = try c.decode(Int.self, forKey: .accuracyStars)
 		speedStars = try c.decode(Int.self, forKey: .speedStars)
 		storageSize = try c.decode(String.self, forKey: .storageSize)
+		isHidden = try c.decodeIfPresent(Bool.self, forKey: .isHidden) ?? false
 		isDownloaded = false
 	}
 }

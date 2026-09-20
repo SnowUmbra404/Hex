@@ -3,7 +3,9 @@ import AppKit
 import ComposableArchitecture
 import Dependencies
 import HexCore
+#if DEBUG
 import Inject
+#endif
 import SwiftUI
 
 private let historyLogger = HexLog.history
