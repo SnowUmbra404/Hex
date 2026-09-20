@@ -45,7 +45,7 @@ jobs:
           path: |
             .build/DerivedData/Build/Intermediates.noindex
             .build/DerivedData/ModuleCache.noindex
-          key: hex-dd-${{ runner.os }}-${{ steps.xcode.outputs.version }}-${{ hashFiles('HexCore/Package.resolved', 'Hex/Hex.xcodeproj/project.pbxproj') }}
+          key: hex-dd-${{ runner.os }}-${{ steps.xcode.outputs.version }}-${{ hashFiles('HexCore/Package.resolved', 'Hex.xcodeproj/project.pbxproj') }}
           restore-keys: |
             hex-dd-${{ runner.os }}-${{ steps.xcode.outputs.version }}-
             hex-dd-${{ runner.os }}-
