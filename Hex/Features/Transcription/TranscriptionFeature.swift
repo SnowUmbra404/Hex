@@ -748,7 +748,7 @@ struct TranscriptionView: View {
       return .transcribing
     } else if store.isRecording {
       return .recording
-    } else if store.isPrewarming || store.isArming {
+    } else if store.isPrewarming {
       return .prewarming
     } else {
       return .hidden
