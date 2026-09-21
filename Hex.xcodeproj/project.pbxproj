@@ -15,6 +15,7 @@
 		4F0D6A092F1A000100000001 /* IdentifiedCollections in Frameworks */ = {isa = PBXBuildFile; productRef = 4F0D6A0D2F1A000100000001 /* IdentifiedCollections */; };
 		4F0D6A0E2F1A000100000001 /* CasePaths in Frameworks */ = {isa = PBXBuildFile; productRef = 4F0D6A0C2F1A000100000001 /* CasePaths */; };
 		4F0D6A0F2F1A000100000001 /* Dependencies in Frameworks */ = {isa = PBXBuildFile; productRef = 47E05E092D44525B00D26DA6 /* Dependencies */; };
+		5F1CC10C2E4A4B0012340003 /* Clocks in Frameworks */ = {isa = PBXBuildFile; productRef = 5F1CC10C2E4A4B0012340002 /* Clocks */; };
 		4F0D6A102F1A000100000001 /* IdentifiedCollections in Frameworks */ = {isa = PBXBuildFile; productRef = 4F0D6A0D2F1A000100000001 /* IdentifiedCollections */; };
 		476316272E5FB31400913CDE /* HexCore in Frameworks */ = {isa = PBXBuildFile; productRef = 476316262E5FB31400913CDE /* HexCore */; };
 		4765045E2D45900200C7EA60 /* Pow in Frameworks */ = {isa = PBXBuildFile; productRef = 4765045D2D45900200C7EA60 /* Pow */; };
@@ -84,6 +85,7 @@
 				4F0D6A052F1A000100000001 /* Sharing in Frameworks */,
 				4F0D6A0E2F1A000100000001 /* CasePaths in Frameworks */,
 				4F0D6A0F2F1A000100000001 /* Dependencies in Frameworks */,
+				5F1CC10C2E4A4B0012340003 /* Clocks in Frameworks */,
 				4F0D6A102F1A000100000001 /* IdentifiedCollections in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -167,6 +169,7 @@
 				4F0D6A072F1A000100000001 /* Sharing */,
 				4F0D6A0C2F1A000100000001 /* CasePaths */,
 				47E05E092D44525B00D26DA6 /* Dependencies */,
+				5F1CC10C2E4A4B0012340002 /* Clocks */,
 				4F0D6A0D2F1A000100000001 /* IdentifiedCollections */,
 			);
 			productName = HexTests;
@@ -240,6 +243,7 @@
 				47E05E002D444EE900D26DA6 /* XCRemoteSwiftPackageReference "swift-composable-architecture" */,
 				47E05E032D444EF800D26DA6 /* XCRemoteSwiftPackageReference "Sauce" */,
 				47E05E082D44525B00D26DA6 /* XCRemoteSwiftPackageReference "swift-dependencies" */,
+				5F1CC10C2E4A4B0012340001 /* XCRemoteSwiftPackageReference "swift-clocks" */,
 				4765045C2D45900200C7EA60 /* XCRemoteSwiftPackageReference "Pow" */,
 				476BAD3C2D47E7880088C61F /* XCRemoteSwiftPackageReference "Sparkle" */,
 				B5045C952D78DED500D0A119 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */,
@@ -658,6 +662,14 @@
 				minimumVersion = 1.17.1;
 			};
 		};
+		5F1CC10C2E4A4B0012340001 /* XCRemoteSwiftPackageReference "swift-clocks" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/pointfreeco/swift-clocks";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.1.1;
+			};
+		};
 		47E16A602EC6C9D300885CF7 /* XCRemoteSwiftPackageReference "FluidAudio" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/FluidInference/FluidAudio";
@@ -734,6 +746,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 47E05E082D44525B00D26DA6 /* XCRemoteSwiftPackageReference "swift-dependencies" */;
 			productName = Dependencies;
+		};
+		5F1CC10C2E4A4B0012340002 /* Clocks */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 5F1CC10C2E4A4B0012340001 /* XCRemoteSwiftPackageReference "swift-clocks" */;
+			productName = Clocks;
 		};
 		47E05E0B2D44525B00D26DA6 /* DependenciesMacros */ = {
 			isa = XCSwiftPackageProductDependency;
