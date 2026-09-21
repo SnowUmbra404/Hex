@@ -10,7 +10,7 @@ let package = Package(
     dependencies: [
         .package(url: "https://github.com/Clipy/Sauce", branch: "master"),
         .package(url: "https://github.com/pointfreeco/swift-dependencies", from: "1.17.1"),
-        .package(url: "https://github.com/apple/swift-log", from: "1.9.1"),
+        .package(url: "https://github.com/apple/swift-log", from: "1.15.1"),
     ],
     targets: [
 	    .target(
