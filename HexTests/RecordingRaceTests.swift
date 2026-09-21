@@ -295,7 +295,7 @@ final class RecordingRaceTests: XCTestCase {
     }
 
     await store.send(.hotKeyPressed)
-    await store.receive(.startRecording) {
+    await store.receive(\.startRecording) {
       $0.isRecording = true
       $0.recordingStartTime = now
       $0.sourceAppBundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
@@ -336,7 +336,7 @@ final class RecordingRaceTests: XCTestCase {
     }
     // Run past both the floor and the tap1 window: nothing may start.
     await clock.advance(by: .seconds(1))
-    await store.receive(.tap1WindowExpired(1)) {
+    await store.receive(\.tap1WindowExpired) {
       $0.isTap1Pending = false
     }
     await store.finish()
@@ -377,11 +377,59 @@ final class RecordingRaceTests: XCTestCase {
     await store.send(.hotKeyPressed) {
       $0.isTap1Pending = false
     }
-    await store.receive(.startRecording) {
+    await store.receive(\.startRecording) {
       $0.isRecording = true
       $0.recordingStartTime = now
       $0.sourceAppBundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
       $0.sourceAppName = NSWorkspace.shared.frontmostApplication?.localizedName
+    }
+    await store.finish()
+  }
+
+  func testLockEngagedStartsImmediatelyFromIdle() async {
+    let now = Date(timeIntervalSince1970: 1_234)
+    let activeApp = NSWorkspace.shared.frontmostApplication
+    let store = TestStore(initialState: Self.makeState()) {
+      TranscriptionFeature()
+    } withDependencies: {
+      $0.date.now = now
+      $0.recording.startRecording = {}
+      $0.sleepManagement.preventSleep = { _ in }
+      $0.soundEffects.play = { _ in }
+    }
+
+    await store.send(.lockEngaged)
+    await store.receive(\.startRecording) {
+      $0.isRecording = true
+      $0.recordingStartTime = now
+      $0.sourceAppBundleID = activeApp?.bundleIdentifier
+      $0.sourceAppName = activeApp?.localizedName
+    }
+    await store.finish()
+  }
+
+  func testLockEngagedCancelsTranscriptionFirst() async {
+    let now = Date(timeIntervalSince1970: 1_234)
+    var state = Self.makeState()
+    state.isTranscribing = true
+    let store = TestStore(initialState: state) {
+      TranscriptionFeature()
+    } withDependencies: {
+      $0.date.now = now
+      $0.recording.startRecording = {}
+      $0.recording.stopRecording = { .ignored(.noActiveRecording) }
+      $0.sleepManagement.preventSleep = { _ in }
+      $0.sleepManagement.allowSleep = {}
+      $0.soundEffects.play = { _ in }
+    }
+
+    await store.send(.lockEngaged)
+    await store.receive(\.cancel) {
+      $0.isTranscribing = false
+    }
+    await store.receive(\.startRecording) {
+      $0.isRecording = true
+      $0.recordingStartTime = now
     }
     await store.finish()
   }

@@ -272,7 +272,8 @@ class KeyEventMonitorClientLive {
       await self?.refreshMonitoringState(reason: "startMonitoring")
     }
   }
-  // TODO: Handle removing the handler from the continuations on deinit/cancellation
+  // Note: per-token cancel removes handlers (see token below); the client lives
+  // for app lifetime so deinit cleanup never runs in production.
   func handleKeyEvent(_ handler: @Sendable @escaping (KeyEvent) -> Bool) -> KeyEventMonitorToken {
     let uuid = UUID()
 

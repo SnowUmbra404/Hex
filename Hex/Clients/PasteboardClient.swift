@@ -228,8 +228,6 @@ struct PasteboardClientLive {
             // Keep the transcribed text in clipboard regardless of setting
             pasteboardLogger.notice("Paste operation failed; text remains in clipboard as fallback.")
             
-            // TODO: Could add a notification here to inform user
-            // that text is available in clipboard
         }
     }
 

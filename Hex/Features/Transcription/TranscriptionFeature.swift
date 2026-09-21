@@ -49,6 +49,7 @@ struct TranscriptionFeature {
     case hotKeyReleased
     case thresholdElapsed(Int)
     case tap1WindowExpired(Int)
+    case lockEngaged
 
     // Recording flow
     case startRecording
@@ -136,6 +137,13 @@ struct TranscriptionFeature {
         }
         state.isTap1Pending = false
         return .none
+
+      case .lockEngaged:
+        // Deliberate lock gesture: instant mic, with the normal cancel-first
+        // behavior when interrupting a transcription.
+        return state.isTranscribing
+          ? .concatenate(.send(.cancel), .send(.startRecording))
+          : .send(.startRecording)
 
       // MARK: - Recording Flow
 
@@ -242,9 +250,10 @@ private extension TranscriptionFeature {
 		  switch hotKeyProcessor.process(keyEvent: keyEvent) {
 		  case .startRecording:
 			// Deliberate lock gesture (double-tap-only second tap lands in
-			// .doubleTapLock): instant mic, bypassing the hold-to-start floor.
+			// .doubleTapLock): instant mic via lockEngaged, which keeps the
+			// normal cancel-first behavior when interrupting a transcription.
 			if hotKeyProcessor.state == .doubleTapLock {
-				Task { await send(.startRecording) }
+				Task { await send(.lockEngaged) }
 			} else {
 				Task { await send(.hotKeyPressed) }
 			}
@@ -347,6 +356,23 @@ private extension TranscriptionFeature {
     state.pressGeneration += 1
     let generation = state.pressGeneration
     return .run { [clock, floor] send in
+      // Disarm if the machine locks or sleeps mid-arm: same suspend names the
+      // recorder watches (RecordingClient startObservingSystemChanges). Fires
+      // .discard, which disarms an unstarted arm and stops an open mic alike.
+      let workspaceCenter = NSWorkspace.shared.notificationCenter
+      let wsObservers = [NSWorkspace.willSleepNotification, NSWorkspace.screensDidSleepNotification].map { name in
+        workspaceCenter.addObserver(forName: name, object: nil, queue: nil) { _ in
+          Task { await send(.discard) }
+        }
+      }
+      let dCenter = DistributedNotificationCenter.default()
+      let dObserver = dCenter.addObserver(forName: Notification.Name("com.apple.screenIsLocked"), object: nil, queue: nil) { _ in
+        Task { await send(.discard) }
+      }
+      defer {
+        wsObservers.forEach(workspaceCenter.removeObserver)
+        dCenter.removeObserver(dObserver)
+      }
       try? await clock.sleep(for: .seconds(floor))
       await send(.thresholdElapsed(generation))
     }
