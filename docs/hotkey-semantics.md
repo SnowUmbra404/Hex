@@ -14,14 +14,14 @@ The key insight: **Modifier-only hotkeys need protection from accidental trigger
 
 **Timeline: Press Option → START recording**
 
-**Before 0.3s (< 0.3s):**
+**Before minimumKeyTime (< S):**
 - Release → DISCARD (silent)
 - Click → DISCARD (silent)
 - Press A → DISCARD (silent)
 - Add Shift → DISCARD (silent)
 - All actions trigger silent discard
 
-**After 0.3s (≥ 0.3s):**
+**After minimumKeyTime (≥ S):**
 - Release → STOP (transcribe)
 - Click → NOP (ignore, keep recording)
 - Press A → NOP (ignore, keep recording)
@@ -29,8 +29,8 @@ The key insight: **Modifier-only hotkeys need protection from accidental trigger
 - ESC → CANCEL (only way to stop)
 
 **Key points:**
-- **< 0.3s**: Everything except ESC triggers **silent discard** (no sound)
-- **≥ 0.3s**: Only **ESC cancels** (with sound), everything else is **ignored**
+- **< minimumKeyTime**: Everything except ESC triggers **silent discard** (no sound)
+- **≥ minimumKeyTime**: Only **ESC cancels** (with sound), everything else is **ignored**
 - Recording continues until you release the modifier or press ESC
 
 ---
@@ -67,10 +67,7 @@ The key insight: **Modifier-only hotkeys need protection from accidental trigger
 ## Constants & Thresholds
 
 ```swift
-// For modifier-only hotkeys (system safety)
-modifierOnlyMinimumDuration = 0.3s
-
-// For all hotkeys (user-configurable)
+// For all hotkeys (user-configurable, governs modifier-only too)
 minimumKeyTime = 0.2s (default)
 
 // Other thresholds
@@ -83,13 +80,9 @@ pressAndHoldCancelThreshold = 1.0s  // For regular hotkeys only
 The **actual threshold** used depends on the hotkey type:
 
 ```swift
-// Modifier-only (e.g., Option)
-effectiveThreshold = max(minimumKeyTime, 0.3s)
-// User sets 0.1s → uses 0.3s
-// User sets 0.5s → uses 0.5s
-
-// Regular (e.g., Cmd+A)
+// All hotkeys (modifier-only and regular alike)
 effectiveThreshold = minimumKeyTime
+// User sets 0.0s → instant (0.0s)
 // User sets 0.1s → uses 0.1s
 // User sets 0.5s → uses 0.5s
 ```
@@ -101,14 +94,14 @@ effectiveThreshold = minimumKeyTime
 When you **release** the hotkey, should we transcribe the recording?
 
 **Modifier-only (Option):**
-- Duration < 0.3s → Discard (silent)
-- Duration ≥ 0.3s → Transcribe
+- Duration < minimumKeyTime → Discard (silent)
+- Duration ≥ minimumKeyTime → Transcribe
 
 **Regular (Cmd+A):**
 - Duration < 0.2s (or < minimumKeyTime) → Discard (silent)
 - Duration ≥ 0.2s (or ≥ minimumKeyTime) → Transcribe
 
-*Note: minimumKeyTime can be adjusted by user, but modifier-only always enforces 0.3s minimum*
+*Note: the minimumKeyTime slider governs every hotkey kind — 0.0 is instant, 0.7 holds until 0.7s.*
 
 ---
 
@@ -116,7 +109,7 @@ When you **release** the hotkey, should we transcribe the recording?
 
 ### 1. Modifier-Only: Option
 
-#### Scenario A: Quick tap (< 0.3s)
+#### Scenario A: Quick tap (< minimumKeyTime)
 ```
 User: Hold Option (0.1s) → Release
       ↓
@@ -126,7 +119,7 @@ Result: No transcription, no sound
 Why: Likely accidental (Option+Click, Option+A for special chars)
 ```
 
-#### Scenario B: Hold and click (< 0.3s)
+#### Scenario B: Hold and click (< minimumKeyTime)
 ```
 User: Hold Option (0.25s) → Click mouse
       ↓
@@ -136,7 +129,7 @@ Result: No transcription, no sound, click passes through
 Why: Option+Click is for duplicating items in macOS
 ```
 
-#### Scenario C: Hold and press A (< 0.3s)
+#### Scenario C: Hold and press A (< minimumKeyTime)
 ```
 User: Hold Option (0.2s) → Press A
       ↓
@@ -146,7 +139,7 @@ Result: No transcription, Option+A passes through to macOS
 Why: Option+A might be for special character "å"
 ```
 
-#### Scenario D: Hold longer (≥ 0.3s)
+#### Scenario D: Hold longer (≥ minimumKeyTime)
 ```
 User: Hold Option (0.5s) → Release
       ↓
@@ -155,17 +148,17 @@ User: Hold Option (0.5s) → Release
 Result: Audio transcribed and pasted
 ```
 
-#### Scenario E: Hold, then click (≥ 0.3s)
+#### Scenario E: Hold, then click (≥ minimumKeyTime)
 ```
 User: Hold Option (0.5s) → Click mouse
       ↓
   START ───────────→ (ignored, keeps recording)
   
 Result: Recording continues, click passes through
-Why: After 0.3s, we assume intentional recording
+Why: After minimumKeyTime, we assume intentional recording
 ```
 
-#### Scenario F: Hold, then add Shift (≥ 0.3s)
+#### Scenario F: Hold, then add Shift (≥ minimumKeyTime)
 ```
 User: Hold Option (0.5s) → Add Shift
       ↓
@@ -230,7 +223,7 @@ Why: Cmd+Shift+A is likely a different command
 
 ### 3. Multi-Modifier: Option+Command
 
-**Behaves like single modifier** (uses 0.3s threshold):
+**Behaves like single modifier** (uses minimumKeyTime):
 
 ```
 User: Hold Option+Command (0.25s) → Add Shift
@@ -248,7 +241,7 @@ User: Hold Option+Command → Release Command (keep Option)
       ↓
   START ───────────→ STOP
   
-Result: Recording stopped and transcribed (if ≥ 0.3s)
+Result: Recording stopped and transcribed (if ≥ minimumKeyTime)
 Why: Releasing any part of the hotkey = release
 ```
 
@@ -325,7 +318,7 @@ Now recording is locked on:
 
 **Example:**
 ```
-User: Press Option (0.2s) → Press A
+User: Press Option (0.1s) → Press A
       ↓
   START → DISCARD (passes through)
   
@@ -343,9 +336,9 @@ Result: Hex discards recording silently
 ### What triggers dirty?
 
 **Modifier-only (Option):**
-- Add extra modifier within 0.3s → dirty
-- Press any key within 0.3s → dirty
-- Click mouse within 0.3s → dirty
+- Add extra modifier within minimumKeyTime → dirty
+- Press any key within minimumKeyTime → dirty
+- Click mouse within minimumKeyTime → dirty
 
 **Regular (Cmd+A):**
 - Press different key within 1s → dirty
@@ -394,8 +387,8 @@ User: Hold Option (0.1s) → Add Shift → Release Shift → Press Option again
 
 5. **If recording active:**
    - **Modifier-only?**
-     - YES → Check elapsed < max(0.3s, minimumKeyTime)
-       - YES → DISCARD or (ignore if ≥0.3s)
+     - YES → Check elapsed < minimumKeyTime
+       - YES → DISCARD
        - NO → (ignore)
    - **Regular hotkey?**
      - Check elapsed < 1s
@@ -419,14 +412,14 @@ User: Hold Option (0.1s) → Add Shift → Release Shift → Press Option again
 - **PRESS & HOLD** (recording)
   - On release (normal):
     - Check elapsed time
-    - If < 0.3s (modifier-only) or < minimumKeyTime (regular) → DISCARD
+    - If < minimumKeyTime → DISCARD
     - If ≥ threshold → Check last tap timing
       - If Δt < 0.3s → LOCK
       - Otherwise → STOP → IDLE
   - On other input:
     - Check elapsed time
-    - If < 0.3s → DISCARD → IDLE
-    - If ≥ 0.3s → (ignore, keep recording)
+    - If < minimumKeyTime → DISCARD → IDLE
+    - If ≥ minimumKeyTime → (ignore, keep recording)
 
 - **LOCK** (hands-free recording)
   - Transition: Tap hotkey again OR press ESC → STOP → IDLE
@@ -442,7 +435,7 @@ Goal: Type "å" (Option+A)
 
 Timeline:
   t=0.0s  Press Option          → START recording
-  t=0.15s Press A               → DISCARD (< 0.3s)
+  t=0.15s Press A               → DISCARD (< minimumKeyTime)
                                   Option+A passes to macOS
   
 macOS sees: Option+A
@@ -452,7 +445,7 @@ Hex: Silent discard, no transcription
 
 **Why this works:**
 - Recording starts immediately (responsive)
-- But discarded if < 0.3s (safety)
+- But discarded if < minimumKeyTime (safety)
 - Keys pass through (Option+A reaches macOS)
 
 ---
@@ -479,7 +472,7 @@ Goal: Duplicate file in Finder
 
 Timeline:
   t=0.0s  Press Option          → START recording
-  t=0.2s  Click file            → DISCARD (< 0.3s)
+  t=0.2s  Click file            → DISCARD (< minimumKeyTime)
                                   Click passes through
   
 Finder sees: Option+Click
@@ -497,7 +490,7 @@ Goal: Dictate code comments while typing
 Timeline:
   t=0.0s  Press Option          → START recording
   t=0.5s  Still talking...      (recording)
-  t=2.0s  Press Cmd+Tab         → IGNORED (> 0.3s)
+  t=2.0s  Press Cmd+Tab         → IGNORED (> minimumKeyTime)
                                   Cmd+Tab passes through
   t=3.0s  Type some code        → IGNORED
   t=5.0s  Release Option        → STOP, TRANSCRIBE
@@ -507,7 +500,7 @@ Result: Audio transcribed ✅
         Typing worked ✅
 ```
 
-**Why:** After 0.3s, Hex assumes you're intentionally recording and ignores other input (except ESC).
+**Why:** After minimumKeyTime, Hex assumes you're intentionally recording and ignores other input (except ESC).
 
 ---
 
@@ -531,13 +524,13 @@ Result: Recording cancelled ✅
 
 **Modifier-only (Option):**
 
-- **Time < 0.3s:**
+- **Time < minimumKeyTime:**
   - Release → Discard
   - Click → Discard
   - Press key → Discard
   - Add modifier → Discard
 
-- **Time ≥ 0.3s:**
+- **Time ≥ minimumKeyTime:**
   - Release → Transcribe
   - Click → Ignore (keep recording)
   - Press key → Ignore (keep recording)

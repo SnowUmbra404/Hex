@@ -275,6 +275,117 @@ final class RecordingRaceTests: XCTestCase {
     XCTAssertEqual(storedDuration, duration)
   }
 
+  // MARK: - Delayed mic-open (hold-to-start)
+
+  func testHotKeyPressStartsImmediatelyAtZeroFloor() async {
+    let now = Date(timeIntervalSince1970: 1_234)
+    var initial = Self.makeState()
+    initial.$hexSettings.withLock {
+      $0.hotkey = HotKey(key: .a, modifiers: [.command])
+      $0.minimumKeyTime = 0
+    }
+    let store = TestStore(initialState: initial) {
+      TranscriptionFeature()
+    } withDependencies: {
+      $0.date.now = now
+      $0.recording.startRecording = {}
+      $0.sleepManagement.preventSleep = { _ in }
+      $0.sleepManagement.allowSleep = {}
+      $0.soundEffects.play = { _ in }
+    }
+
+    await store.send(.hotKeyPressed)
+    await store.receive(.startRecording) {
+      $0.isRecording = true
+      $0.recordingStartTime = now
+      $0.sourceAppBundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+      $0.sourceAppName = NSWorkspace.shared.frontmostApplication?.localizedName
+    }
+    await store.finish()
+  }
+
+  func testArmedReleaseNeverOpensMic() async {
+    let clock = TestClock()
+    let now = Date(timeIntervalSince1970: 1_234)
+    var initial = Self.makeState()
+    initial.$hexSettings.withLock {
+      $0.hotkey = HotKey(key: nil, modifiers: [.option])
+      $0.minimumKeyTime = 0.5
+    }
+    let probe = RecordingProbe(stopURL: FileManager.default.temporaryDirectory
+      .appendingPathComponent("armed-release-\(UUID().uuidString).wav"))
+    let store = TestStore(initialState: initial) {
+      TranscriptionFeature()
+    } withDependencies: {
+      $0.date.now = now
+      $0.continuousClock = clock
+      $0.recording.startRecording = {
+        await probe.recordStart()
+      }
+    }
+
+    // floor = max(0.5, 0.3) = 0.5: press arms instead of opening the mic.
+    await store.send(.hotKeyPressed) {
+      $0.isArming = true
+      $0.pressGeneration = 1
+    }
+    // Release before the floor elapses: mic never opened, tap1 window opens.
+    await store.send(.hotKeyReleased) {
+      $0.isArming = false
+      $0.isTap1Pending = true
+    }
+    // Run past both the floor and the tap1 window: nothing may start.
+    await clock.advance(by: .seconds(1))
+    await store.receive(.tap1WindowExpired(1)) {
+      $0.isTap1Pending = false
+    }
+    await store.finish()
+
+    let counts = await probe.counts()
+    XCTAssertEqual(counts.startCalls, 0)
+  }
+
+  func testSecondTapInsideWindowStartsImmediately() async {
+    let clock = TestClock()
+    let now = Date(timeIntervalSince1970: 1_234)
+    var initial = Self.makeState()
+    initial.$hexSettings.withLock {
+      $0.hotkey = HotKey(key: nil, modifiers: [.option])
+      $0.minimumKeyTime = 0.5
+    }
+    let store = TestStore(initialState: initial) {
+      TranscriptionFeature()
+    } withDependencies: {
+      $0.date.now = now
+      $0.continuousClock = clock
+      $0.recording.startRecording = {}
+      $0.sleepManagement.preventSleep = { _ in }
+      $0.sleepManagement.allowSleep = {}
+      $0.soundEffects.play = { _ in }
+    }
+
+    await store.send(.hotKeyPressed) {
+      $0.isArming = true
+      $0.pressGeneration = 1
+    }
+    await store.send(.hotKeyReleased) {
+      $0.isArming = false
+      $0.isTap1Pending = true
+    }
+    // Second tap inside the window (clock never advanced past the floor):
+    // lock intent starts the mic immediately.
+    await store.send(.hotKeyPressed) {
+      $0.isTap1Pending = false
+    }
+    await store.receive(.startRecording) {
+      $0.isRecording = true
+      $0.recordingStartTime = now
+      $0.sourceAppBundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+      $0.sourceAppName = NSWorkspace.shared.frontmostApplication?.localizedName
+    }
+    await store.finish()
+  }
+
   private static func makeState() -> TranscriptionFeature.State {
     TranscriptionFeature.State(
       hexSettings: Shared(value: .init()),

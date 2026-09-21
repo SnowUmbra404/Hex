@@ -21,24 +21,6 @@ public enum HexCoreConstants {
     /// - Tests: Verifying double-tap vs two separate taps
     public static let doubleTapWindow: TimeInterval = 0.3
     
-    /// Minimum duration for modifier-only hotkeys to avoid conflicts with OS shortcuts.
-    ///
-    /// **Value:** 0.3 seconds
-    ///
-    /// **Rationale:** macOS uses modifier keys for many shortcuts:
-    /// - Option+click = duplicate in Finder
-    /// - Cmd+click = open in new tab
-    /// - etc.
-    ///
-    /// A 0.3s minimum prevents accidental transcription when users perform these
-    /// system actions. This value is enforced regardless of user's `minimumKeyTime` setting
-    /// (though user can set higher if desired).
-    ///
-    /// **Used in:**
-    /// - `RecordingDecisionEngine`: Discard short modifier-only recordings
-    /// - `HotKeyProcessor`: Mouse click cancellation threshold
-    public static let modifierOnlyMinimumDuration: TimeInterval = 0.3
-    
     /// Time window for canceling press-and-hold on different key press.
     ///
     /// **Value:** 1.0 second
@@ -47,7 +29,7 @@ public enum HexCoreConstants {
     /// key within 1 second, it's likely accidental (fat-finger, muscle memory for different shortcut).
     /// After 1 second, we assume the user wants to type while recording.
     ///
-    /// Does NOT apply to modifier-only hotkeys (they use `modifierOnlyMinimumDuration` instead).
+    /// Does NOT apply to modifier-only hotkeys (they use the user's `minimumKeyTime` instead).
     ///
     /// **Used in:**
     /// - `HotKeyProcessor`: Accidental key press detection for key+modifier hotkeys
@@ -60,8 +42,7 @@ public enum HexCoreConstants {
     /// **Value:** 0.2 seconds
     ///
     /// **Rationale:** Prevents very quick accidental taps while still feeling responsive.
-    /// User-configurable in Settings. Modifier-only hotkeys override this with
-    /// `modifierOnlyMinimumDuration` if higher.
+    /// User-configurable in Settings. Applies to modifier-only hotkeys as well.
     ///
     /// **Used in:**
     /// - `HexSettings`: Default value for user preference

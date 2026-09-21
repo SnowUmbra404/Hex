@@ -109,7 +109,7 @@ struct HotKeyProcessorTests {
             steps: [
                 // Initial hotkey press (option)
                 ScenarioStep(time: 0.0, key: nil, modifiers: [.option], expectedOutput: .startRecording, expectedIsMatched: true),
-                // Press a different modifier after threshold (0.5s > 0.3s) - should be ignored
+                // Press a different modifier after threshold (0.5s > minimumKeyTime) - should be ignored
                 ScenarioStep(time: 0.5, key: nil, modifiers: [.option, .command], expectedOutput: nil, expectedIsMatched: true),
             ]
         )
@@ -358,7 +358,7 @@ struct HotKeyProcessorTests {
                 ScenarioStep(time: 0.05, key: nil, modifiers: [],    expectedOutput: nil, expectedIsMatched: false),
                 // Next standalone Fn press should trigger recording
                 ScenarioStep(time: 0.20, key: nil, modifiers: [.fn], expectedOutput: .startRecording, expectedIsMatched: true),
-                // Release Fn should stop recording (must exceed modifierOnlyMinimumDuration)
+                // Release Fn should stop recording
                 ScenarioStep(time: 0.40, key: nil, modifiers: [],    expectedOutput: .stopRecording, expectedIsMatched: false),
             ]
         )
@@ -378,7 +378,7 @@ struct HotKeyProcessorTests {
                 // Only once the user fully releases and presses Fn again should it start
                 ScenarioStep(time: 0.10, key: nil, modifiers: [],    expectedOutput: nil, expectedIsMatched: false),
                 ScenarioStep(time: 0.25, key: nil, modifiers: [.fn], expectedOutput: .startRecording, expectedIsMatched: true),
-                // Must exceed modifierOnlyMinimumDuration before stopping
+                // Release stops recording
                 ScenarioStep(time: 0.60, key: nil, modifiers: [],    expectedOutput: .stopRecording, expectedIsMatched: false),
             ]
         )
@@ -537,7 +537,7 @@ struct HotKeyProcessorTests {
             steps: [
                 // Press both required modifiers
                 ScenarioStep(time: 0.0, key: nil, modifiers: [.option, .command], expectedOutput: .startRecording, expectedIsMatched: true),
-                // Add Shift after threshold (0.5s > 0.3s) - should be ignored
+                // Add Shift after threshold (0.5s > minimumKeyTime) - should be ignored
                 ScenarioStep(time: 0.5, key: nil, modifiers: [.option, .command, .shift], expectedOutput: nil, expectedIsMatched: true),
             ]
         )
@@ -738,7 +738,7 @@ struct RecordingDecisionTests {
 
     @Test
     func longPressModifierOnlyProceeds() {
-        // Duration at modifierOnlyMinimumDuration threshold (0.3s)
+        // Duration above the user's minimumKeyTime (the slider governs modifier-only too)
         let ctx = makeContext(hotkey: HotKey(key: nil, modifiers: [.option]), duration: 0.3)
         #expect(RecordingDecisionEngine.decide(ctx) == .proceedToTranscription)
     }
@@ -757,29 +757,36 @@ struct RecordingDecisionTests {
     // MARK: - Modifier-Only Minimum Duration Tests
     
     @Test
-    func modifierOnly_enforcesMinimumDuration_0_3s() {
-        // User sets minimumKeyTime to 0.1s, but modifier-only enforces modifierOnlyMinimumDuration (0.3s)
+    func modifierOnly_followsUserMinimumKeyTime() {
+        // User sets minimumKeyTime to 0.1s, so a 0.25s modifier-only hold proceeds (no 0.3s floor)
         let ctx = makeContext(hotkey: HotKey(key: nil, modifiers: [.option]), minimumKeyTime: 0.1, duration: 0.25)
+        #expect(RecordingDecisionEngine.decide(ctx) == .proceedToTranscription)
+    }
+    
+    @Test
+    func modifierOnly_discardsBelowUserMinimumKeyTime() {
+        // User sets minimumKeyTime to 0.1s, so a 0.05s modifier-only hold is discarded
+        let ctx = makeContext(hotkey: HotKey(key: nil, modifiers: [.option]), minimumKeyTime: 0.1, duration: 0.05)
         #expect(RecordingDecisionEngine.decide(ctx) == .discardShortRecording)
     }
     
     @Test
     func modifierOnly_proceedsWhenAboveMinimumDuration() {
-        // User sets minimumKeyTime to 0.1s, recording is 0.35s (above modifierOnlyMinimumDuration)
+        // User sets minimumKeyTime to 0.1s, recording is 0.35s (above the user's minimumKeyTime)
         let ctx = makeContext(hotkey: HotKey(key: nil, modifiers: [.option]), minimumKeyTime: 0.1, duration: 0.35)
         #expect(RecordingDecisionEngine.decide(ctx) == .proceedToTranscription)
     }
     
     @Test
     func modifierOnly_respectsUserPreferenceWhenHigher() {
-        // User sets minimumKeyTime to 0.5s (higher than modifierOnlyMinimumDuration)
+        // User sets minimumKeyTime to 0.5s (higher than the default)
         let ctx = makeContext(hotkey: HotKey(key: nil, modifiers: [.option]), minimumKeyTime: 0.5, duration: 0.4)
         #expect(RecordingDecisionEngine.decide(ctx) == .discardShortRecording)
     }
     
     @Test
     func printableKey_doesNotEnforceModifierOnlyMinimum() {
-        // Printable key hotkeys use user's minimumKeyTime, not modifierOnlyMinimumDuration
+        // Printable key hotkeys use user's minimumKeyTime, just like modifier-only ones now
         let ctx = makeContext(hotkey: HotKey(key: .a, modifiers: [.command]), minimumKeyTime: 0.1, duration: 0.15)
         #expect(RecordingDecisionEngine.decide(ctx) == .proceedToTranscription)
     }
@@ -804,9 +811,9 @@ struct MouseClickTests {
         }
         #expect(startOutput == .startRecording)
         
-        // Mouse click 0.25s later (< 0.3s threshold for modifier-only) should discard silently
+        // Mouse click 0.1s later (< 0.15s minimumKeyTime) should discard silently
         let clickOutput = withDependencies {
-            $0.date.now = Date(timeIntervalSince1970: 0.25)
+            $0.date.now = Date(timeIntervalSince1970: 0.1)
         } operation: {
             processor.processMouseClick()
         }
@@ -829,7 +836,7 @@ struct MouseClickTests {
         }
         #expect(startOutput == .startRecording)
         
-        // Mouse click 0.35s later (> 0.3s threshold) should be ignored - only ESC cancels
+        // Mouse click 0.35s later (> 0.15s minimumKeyTime) should be ignored - only ESC cancels
         let clickOutput = withDependencies {
             $0.date.now = Date(timeIntervalSince1970: 0.35)
         } operation: {
@@ -923,7 +930,7 @@ struct MouseClickTests {
         }
         #expect(startOutput == .startRecording)
         
-        // Mouse click 0.4s later (> 0.3s but < 0.5s user preference) should still discard
+        // Mouse click 0.4s later (< 0.5s user preference) should still discard
         let clickOutput = withDependencies {
             $0.date.now = Date(timeIntervalSince1970: 0.4)
         } operation: {

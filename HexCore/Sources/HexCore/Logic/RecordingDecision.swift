@@ -5,12 +5,6 @@ import Foundation
 /// This engine enforces minimum recording durations to prevent accidental activations
 /// and conflicts with system shortcuts.
 public struct RecordingDecisionEngine {
-    /// Minimum duration for modifier-only hotkeys to avoid OS shortcut conflicts.
-    ///
-    /// This is applied regardless of user's minimumKeyTime setting.
-    /// See `HexCoreConstants.modifierOnlyMinimumDuration` for rationale.
-    public static let modifierOnlyMinimumDuration: TimeInterval = HexCoreConstants.modifierOnlyMinimumDuration
-    
     /// Context information needed to make a recording decision.
     public struct Context: Equatable {
         /// The hotkey configuration that triggered this recording
@@ -52,8 +46,7 @@ public struct RecordingDecisionEngine {
     /// # Decision Logic
     ///
     /// **Modifier-only hotkeys** (e.g., Option):
-    /// - Must meet `max(minimumKeyTime, modifierOnlyMinimumDuration)`
-    /// - Always enforces 0.3s minimum to prevent OS shortcut conflicts
+    /// - Must meet the user's `minimumKeyTime` (the minimumKeyTime slider governs)
     ///
     /// **Key+modifier hotkeys** (e.g., Cmd+A):
     /// - Always proceeds to transcription (duration checked elsewhere)
@@ -65,11 +58,8 @@ public struct RecordingDecisionEngine {
         let elapsed = context.recordingStartTime.map { context.currentTime.timeIntervalSince($0) } ?? 0
         let includesPrintableKey = context.hotkey.key != nil
         
-        // For modifier-only hotkeys, use the higher of minimumKeyTime or modifierOnlyMinimumDuration
-        // to prevent conflicts with system shortcuts
-        let effectiveMinimum = includesPrintableKey 
-            ? context.minimumKeyTime 
-            : max(context.minimumKeyTime, modifierOnlyMinimumDuration)
+        // For modifier-only hotkeys, the user's minimumKeyTime slider alone governs.
+        let effectiveMinimum = context.minimumKeyTime
         
         let durationIsLongEnough = elapsed >= effectiveMinimum
         return (durationIsLongEnough || includesPrintableKey) ? .proceedToTranscription : .discardShortRecording

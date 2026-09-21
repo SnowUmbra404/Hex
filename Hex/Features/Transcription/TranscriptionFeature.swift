@@ -23,6 +23,12 @@ struct TranscriptionFeature {
     var isRecording: Bool = false
     var isTranscribing: Bool = false
     var isPrewarming: Bool = false
+    // Delayed mic-open: press is ARMED until the hold floor elapses; the mic
+    // opens iff the old stop-time rule would have kept the recording.
+    var isArming: Bool = false
+    var pressGeneration: Int = 0
+    // First tap of a potential double-tap lock (key released before the floor).
+    var isTap1Pending: Bool = false
     var error: String?
     var recordingStartTime: Date?
     var meter: Meter = .init(averagePower: 0, peakPower: 0)
@@ -41,6 +47,8 @@ struct TranscriptionFeature {
     // Hotkey actions
     case hotKeyPressed
     case hotKeyReleased
+    case thresholdElapsed(Int)
+    case tap1WindowExpired(Int)
 
     // Recording flow
     case startRecording
@@ -63,6 +71,8 @@ struct TranscriptionFeature {
     case recordingStart
     case recordingCleanup
     case transcription
+    case arming
+    case tap1Window
   }
 
   @Dependency(\.transcription) var transcription
@@ -72,6 +82,7 @@ struct TranscriptionFeature {
   @Dependency(\.soundEffects) var soundEffect
   @Dependency(\.sleepManagement) var sleepManagement
   @Dependency(\.date.now) var now
+  @Dependency(\.continuousClock) var clock
   @Dependency(\.transcriptPersistence) var transcriptPersistence
 
   var body: some ReducerOf<Self> {
@@ -99,14 +110,32 @@ struct TranscriptionFeature {
       // MARK: - HotKey Flow
 
       case .hotKeyPressed:
-        // If we're transcribing, send a cancel first. Otherwise start recording immediately.
-        // We'll decide later (on release) whether to keep or discard the recording.
-        return handleHotKeyPressed(isTranscribing: state.isTranscribing)
+        // Delayed mic-open: arm until the hold floor elapses. The mic opens
+        // iff the old stop-time rule would have kept the recording.
+        return handleHotKeyPressed(&state)
 
       case .hotKeyReleased:
-        // If we're currently recording, then stop. Otherwise, just cancel
-        // the delayed "startRecording" effect if we never actually started.
-        return handleHotKeyReleased(isRecording: state.isRecording)
+        // While armed-never-started the mic never opened, so there is nothing
+        // to stop or discard — just disarm (and open the tap1 window).
+        return handleHotKeyReleased(&state)
+
+      case let .thresholdElapsed(generation):
+        // Open the mic only if this timer is still current and the key is
+        // still held. Stale generations (superseded presses) are ignored.
+        guard generation == state.pressGeneration, state.isArming, !state.isRecording else {
+          return .none
+        }
+        state.isArming = false
+        return state.isTranscribing
+          ? .concatenate(.send(.cancel), .send(.startRecording))
+          : .send(.startRecording)
+
+      case let .tap1WindowExpired(generation):
+        guard generation == state.pressGeneration, state.isTap1Pending else {
+          return .none
+        }
+        state.isTap1Pending = false
+        return .none
 
       // MARK: - Recording Flow
 
@@ -130,16 +159,34 @@ struct TranscriptionFeature {
       // MARK: - Cancel/Discard Flow
 
       case .cancel:
-        // Only cancel if we're in the middle of recording, transcribing, or post-processing
+        // Only cancel if we're in the middle of recording, transcribing, or post-processing.
+        // While armed-never-started the mic never opened: just disarm silently.
         guard state.isRecording || state.isTranscribing else {
-          return .none
+          guard state.isArming || state.isTap1Pending else {
+            return .none
+          }
+          state.isArming = false
+          state.isTap1Pending = false
+          return .merge(
+            .cancel(id: CancelID.arming),
+            .cancel(id: CancelID.tap1Window)
+          )
         }
         return handleCancel(&state)
 
       case .discard:
-        // Silent discard for quick/accidental recordings
+        // Silent discard for quick/accidental recordings.
+        // While armed-never-started the mic never opened: just disarm silently.
         guard state.isRecording else {
-          return .none
+          guard state.isArming || state.isTap1Pending else {
+            return .none
+          }
+          state.isArming = false
+          state.isTap1Pending = false
+          return .merge(
+            .cancel(id: CancelID.arming),
+            .cancel(id: CancelID.tap1Window)
+          )
         }
         return handleDiscard(&state)
       }
@@ -194,7 +241,13 @@ private extension TranscriptionFeature {
 		  // Process the key event
 		  switch hotKeyProcessor.process(keyEvent: keyEvent) {
 		  case .startRecording:
-			Task { await send(.hotKeyPressed) }
+			// Deliberate lock gesture (double-tap-only second tap lands in
+			// .doubleTapLock): instant mic, bypassing the hold-to-start floor.
+			if hotKeyProcessor.state == .doubleTapLock {
+				Task { await send(.startRecording) }
+			} else {
+				Task { await send(.hotKeyPressed) }
+			}
             // If the hotkey is purely modifiers, return false to keep it from interfering with normal usage
             // But if useDoubleTapOnly is true, always intercept the key
             return useDoubleTapOnly || keyEvent.key != nil
@@ -259,18 +312,74 @@ private extension TranscriptionFeature {
 // MARK: - HotKey Press/Release Handlers
 
 private extension TranscriptionFeature {
-  func handleHotKeyPressed(isTranscribing: Bool) -> Effect<Action> {
-    // If already transcribing, cancel first. Otherwise start recording immediately.
-    guard isTranscribing else { return .send(.startRecording) }
-    return .concatenate(
-      .send(.cancel),
-      .send(.startRecording)
-    )
+  func handleHotKeyPressed(_ state: inout State) -> Effect<Action> {
+    // Second tap inside the tap1 window means lock intent: instant mic.
+    if state.isTap1Pending {
+      state.isTap1Pending = false
+      state.isArming = false
+      let immediate: Effect<Action> =
+        state.isTranscribing
+        ? .concatenate(.send(.cancel), .send(.startRecording))
+        : .send(.startRecording)
+      return .merge(
+        .cancel(id: CancelID.arming),
+        .cancel(id: CancelID.tap1Window),
+        immediate
+      )
+    }
+    // Interrupting a transcription keeps the old behavior: cancel, then start now.
+    if state.isTranscribing {
+      state.isArming = false
+      return .merge(
+        .cancel(id: CancelID.arming),
+        .cancel(id: CancelID.tap1Window),
+        .concatenate(.send(.cancel), .send(.startRecording))
+      )
+    }
+    // Hold floor is exactly the slider value for every hotkey kind: 0.0 means
+    // instant, 0.7 means after 0.7s. No hardcoded guard.
+    let floor = state.hexSettings.minimumKeyTime
+    // Zero floor: today's path, byte-identical.
+    guard floor > 0 else {
+      return .send(.startRecording)
+    }
+    state.isArming = true
+    state.pressGeneration += 1
+    let generation = state.pressGeneration
+    return .run { [clock, floor] send in
+      try? await clock.sleep(for: .seconds(floor))
+      await send(.thresholdElapsed(generation))
+    }
+    .cancellable(id: CancelID.arming, cancelInFlight: true)
   }
 
-  func handleHotKeyReleased(isRecording: Bool) -> Effect<Action> {
-    // Always stop recording when hotkey is released
-    return isRecording ? .send(.stopRecording) : .none
+  func handleHotKeyReleased(_ state: inout State) -> Effect<Action> {
+    // Mic open: normal stop.
+    if state.isRecording {
+      return .send(.stopRecording)
+    }
+    // Armed-never-started: the mic never opened, so there is nothing to stop
+    // or discard — cancel the pending threshold timer and clear arming.
+    guard state.isArming else {
+      return .none
+    }
+    state.isArming = false
+    guard state.hexSettings.doubleTapLockEnabled else {
+      return .cancel(id: CancelID.arming)
+    }
+    // First tap of a potential double-tap lock: hold the window open for a
+    // second press, which starts instantly (lock intent). Same value as
+    // HotKeyProcessor.doubleTapThreshold (its tap-to-tap window).
+    state.isTap1Pending = true
+    let generation = state.pressGeneration
+    return .merge(
+      .cancel(id: CancelID.arming),
+      .run { [clock] send in
+        try? await clock.sleep(for: .seconds(HotKeyProcessor.doubleTapThreshold))
+        await send(.tap1WindowExpired(generation))
+      }
+      .cancellable(id: CancelID.tap1Window, cancelInFlight: true)
+    )
   }
 }
 
@@ -278,6 +387,8 @@ private extension TranscriptionFeature {
 
 private extension TranscriptionFeature {
   func handleStartRecording(_ state: inout State) -> Effect<Action> {
+    // Mic open: never armed.
+    state.isArming = false
     guard state.modelBootstrapState.isModelReady else {
       return .merge(
         .send(.modelMissing),
@@ -637,7 +748,7 @@ struct TranscriptionView: View {
       return .transcribing
     } else if store.isRecording {
       return .recording
-    } else if store.isPrewarming {
+    } else if store.isPrewarming || store.isArming {
       return .prewarming
     } else {
       return .hidden
